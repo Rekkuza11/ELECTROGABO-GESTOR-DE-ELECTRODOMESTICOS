@@ -1,62 +1,104 @@
-from database import obtener_conexion
+"""
+DAO Cliente.
+Aplica Singleton de DB, excepciones especializadas y método de clase fábrica.
+"""
+
+from database import DatabaseConnection
 from models.cliente import Cliente
+from exceptions import (
+    ClienteNoEncontradoError,
+    ClienteDuplicadoError,
+    IntegridadDatosError,
+    BaseDatosError,
+)
+
 
 class ClienteDAO:
+    """Objeto de acceso a datos para la entidad Cliente."""
 
-    def insertar(self, cliente):
-        conexion = obtener_conexion()
+    def __init__(self):
+        self._db = DatabaseConnection()
+
+    # ── Métodos públicos ──────────────────────────────────────────────────────
+
+    def insertar(self, cliente: Cliente) -> None:
+        conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
-
         try:
             cursor.execute(
                 "INSERT INTO usuario (id_usuario, password_hash, tipo) VALUES (%s, %s, %s)",
                 (cliente.id_usuario, cliente.password, "cliente")
             )
-
             cursor.execute(
                 "INSERT INTO cliente (id_cliente, nombre, telefono, direccion) VALUES (%s, %s, %s, %s)",
                 (cliente.id_usuario, cliente.nombre, cliente.telefono, cliente.direccion)
             )
-
             conexion.commit()
-
         except Exception as e:
-            print(e)
             conexion.rollback()
-
+            self.__manejar_error(e, "insertar cliente")
         finally:
-            conexion.close()
+            cursor.close()
 
-    def obtener_todos(self):
-        conexion = obtener_conexion()
+    def obtener_todos(self) -> list:
+        conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
+        try:
+            cursor.execute("""
+                SELECT c.id_cliente, c.nombre, c.telefono, c.direccion, u.password_hash
+                FROM cliente c
+                JOIN usuario u ON c.id_cliente = u.id_usuario
+            """)
+            return [Cliente.desde_fila_bd(fila) for fila in cursor.fetchall()]
+        except Exception as e:
+            self.__manejar_error(e, "obtener todos los clientes")
+        finally:
+            cursor.close()
 
-        cursor.execute("""
-            SELECT c.id_cliente, c.nombre, c.telefono, c.direccion, u.password_hash
-            FROM cliente c
-            JOIN usuario u ON c.id_cliente = u.id_usuario
-        """)
+    def obtener_por_id(self, id_cliente) -> Cliente:
+        conexion = self._db.obtener_conexion()
+        cursor = conexion.cursor()
+        try:
+            cursor.execute("""
+                SELECT c.id_cliente, c.nombre, c.telefono, c.direccion, u.password_hash
+                FROM cliente c
+                JOIN usuario u ON c.id_cliente = u.id_usuario
+                WHERE c.id_cliente = %s
+            """, (id_cliente,))
+            fila = cursor.fetchone()
+            if not fila:
+                raise ClienteNoEncontradoError(id_cliente)
+            return Cliente.desde_fila_bd(fila)
+        except ClienteNoEncontradoError:
+            raise
+        except Exception as e:
+            self.__manejar_error(e, f"obtener cliente {id_cliente}")
+        finally:
+            cursor.close()
 
-        clientes = []
-        for fila in cursor.fetchall():
-            clientes.append(self._crear_objeto(fila))
+    def eliminar(self, id_cliente) -> None:
+        conexion = self._db.obtener_conexion()
+        cursor = conexion.cursor()
+        try:
+            cursor.execute("DELETE FROM usuario WHERE id_usuario=%s", (id_cliente,))
+            if cursor.rowcount == 0:
+                raise ClienteNoEncontradoError(id_cliente)
+            conexion.commit()
+        except ClienteNoEncontradoError:
+            raise
+        except Exception as e:
+            conexion.rollback()
+            self.__manejar_error(e, f"eliminar cliente {id_cliente}")
+        finally:
+            cursor.close()
 
-        conexion.close()
-        return clientes
+    # ── Privados de ayuda ─────────────────────────────────────────────────────
 
-    def _crear_objeto(self, fila):
-        return Cliente(
-            fila[0],
-            fila[4],
-            fila[1],
-            fila[2],
-            fila[3]
-        )
-
-
-if __name__ == "__main__":
-    dao = ClienteDAO()
-    clientes = dao.obtener_todos()
-
-    for c in clientes:
-        print(c.id_usuario, c.nombre, c.telefono, c.direccion, c.password)
+    @staticmethod
+    def __manejar_error(error: Exception, operacion: str) -> None:
+        mensaje = str(error)
+        if "Duplicate entry" in mensaje:
+            raise ClienteDuplicadoError(mensaje) from error
+        if "foreign key" in mensaje.lower():
+            raise IntegridadDatosError(mensaje) from error
+        raise BaseDatosError(f"Error en '{operacion}': {mensaje}") from error
