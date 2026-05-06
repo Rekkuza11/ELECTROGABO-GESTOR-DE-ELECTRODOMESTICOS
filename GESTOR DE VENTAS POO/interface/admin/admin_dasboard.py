@@ -8,7 +8,7 @@ def abrir_dashboard(root):
     ventana.geometry("1100x650")
     ventana.configure(fg_color="#f1f5f9")
 
-    # ---- MENU LATERAL ----
+    
     menu = ctk.CTkFrame(ventana, fg_color="white", width=220, corner_radius=0)
     menu.pack(side="left", fill="y")
     menu.pack_propagate(False)
@@ -48,7 +48,7 @@ def abrir_dashboard(root):
                   fg_color="transparent", text_color="red",
                   hover_color="#fee2e2", anchor="w").pack(padx=10)
 
-    # ---- CONTENIDO PRINCIPAL ----
+    
     contenido = ctk.CTkFrame(ventana, fg_color="#f1f5f9")
     contenido.pack(side="left", fill="both", expand=True)
 
@@ -60,11 +60,11 @@ def abrir_dashboard(root):
                  font=("Arial", 13),
                  text_color="gray").pack(anchor="w", padx=30, pady=(0,20))
 
-    # ---- FILA 1: 3 tarjetas ----
+    
     fila1 = ctk.CTkFrame(contenido, fg_color="transparent")
     fila1.pack(fill="x", padx=30, pady=(0,10))
 
-    # Tarjeta Ventas del dia
+    
     t1 = ctk.CTkFrame(fila1, fg_color="white", corner_radius=12, height=160)
     t1.pack(side="left", expand=True, fill="both", padx=(0,10))
     t1.pack_propagate(False)
@@ -78,7 +78,7 @@ def abrir_dashboard(root):
     ctk.CTkLabel(t1, text="0 transacciones", font=("Arial", 11),
                  text_color="gray").pack(anchor="w", padx=20, pady=(0,20))
 
-    # Tarjeta Ingresos Totales
+   
     t2 = ctk.CTkFrame(fila1, fg_color="white", corner_radius=12, height=160)
     t2.pack(side="left", expand=True, fill="both", padx=(0,10))
     t2.pack_propagate(False)
@@ -92,7 +92,7 @@ def abrir_dashboard(root):
     ctk.CTkLabel(t2, text="Acumulado histórico", font=("Arial", 11),
                  text_color="gray").pack(anchor="w", padx=20, pady=(0,20))
 
-    # Tarjeta Productos
+    
     t3 = ctk.CTkFrame(fila1, fg_color="white", corner_radius=12, height=160)
     t3.pack(side="left", expand=True, fill="both")
     t3.pack_propagate(False)
