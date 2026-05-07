@@ -1,20 +1,24 @@
+from interface.main import App
+from config.database import DatabaseConnection
+
+def main():
+    try:
+        # Conexión BD
+        db = DatabaseConnection()
+        db.connect()
+
+        # Ejecutar app
+        app = App()
+        app.mainloop()
+
+    except Exception as e:
+        print(f"Error del sistema: {e}")
+
+    finally:
+        try:
+            db.close()
+        except:
+            pass
+
 if __name__ == "__main__":
-    from models.producto import Producto 
-    from dao.producto_dao import ProductoDAO
-    
-    dao = ProductoDAO()
-
-    nuevo = Producto("Multímetro Digital", "Fluke", 45.50, 85.00, 10)
-    dao.insertar(nuevo)
-    print(f"Producto insertado con ID: {nuevo.id_producto}")
-
-   
-    print("\nInventario actual:")
-    productos = dao.obtener_todos()
-    for p in productos:
-        print(p) 
-
-   
-    if nuevo.id_producto:
-        dao.actualizar_stock(nuevo.id_producto, 2)
-        print(f"\nStock actualizado para el producto {nuevo.id_producto}")
+    main()
