@@ -1,24 +1,12 @@
 from interface.main import App
-from config.database import DatabaseConnection
+
 
 def main():
-    try:
-        
-        db = DatabaseConnection()
-        db.connect()
 
-     
-        app = App()
-        app.mainloop()
+    app = App()
 
-    except Exception as e:
-        print(f"Error del sistema: {e}")
+    app.mainloop()
 
-    finally:
-        try:
-            db.close()
-        except:
-            pass
 
 if __name__ == "__main__":
     main()
