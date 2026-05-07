@@ -1,6 +1,6 @@
 import customtkinter as ctk
 
-from interface.login_view import LoginView
+from interface.login.login_view import LoginView
 
 class App(ctk.CTk):
 
