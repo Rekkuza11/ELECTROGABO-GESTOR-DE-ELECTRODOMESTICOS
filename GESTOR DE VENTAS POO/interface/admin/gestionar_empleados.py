@@ -127,8 +127,7 @@ def abrir_gestionar_empleados(parent: ctk.CTkFrame) -> None:
                          f"¿Eliminar al empleado '{fila[1]}' permanentemente?"):
             return
         try:
-            from dao.usuario_dao import UsuarioDAO
-            UsuarioDAO().eliminar(fila[0])
+            _DAO.eliminar(fila[0])
             exito("Eliminado", f"Empleado '{fila[1]}' eliminado.")
             _limpiar_form()
             _recargar_tabla()

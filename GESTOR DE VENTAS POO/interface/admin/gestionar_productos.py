@@ -47,7 +47,9 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
                                 font=("Arial", 12), border_color="#cbd5e1")
     entry_buscar.pack(side="left", padx=12, pady=10)
 
-    btn_secundario(barra, "↺  Recargar", ancho=110, alto=34).pack(side="left", padx=(0, 8), pady=10)
+    # El comando se asigna tras definir _recargar_tabla más abajo
+    btn_recargar = btn_secundario(barra, "↺  Recargar", ancho=110, alto=34)
+    btn_recargar.pack(side="left", padx=(0, 8), pady=10)
 
     seccion_titulo(panel_izq, "📋 Inventario Completo")
 
@@ -83,17 +85,29 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
         try:
             productos = _CTRL.listar()
         except Exception as e:
-            msg_error("Error", str(e))
+            estado.mostrar(f"Error al cargar productos: {e}", "error")
             return
+        if not productos:
+            estado.mostrar("No hay productos registrados en la base de datos.", "advertencia")
+            return
+        estado.limpiar()
         for p in productos:
-            if filtro.lower() in p.nombre.lower() or filtro.lower() in p.marca.lower():
-                margen = f"{p.calcular_margen(p.precio_compra, p.precio_venta)}%"
-                tabla.insert("", "end", values=(
-                    p.id_producto, p.nombre, p.marca,
-                    formatear_moneda(p.precio_compra),
-                    formatear_moneda(p.precio_venta),
-                    p.stock, margen,
-                ))
+            try:
+                if filtro.lower() in p.nombre.lower() or filtro.lower() in p.marca.lower():
+                    # Calcular margen de forma segura — precio_compra podria ser 0
+                    try:
+                        margen = f"{p.calcular_margen(p.precio_compra, p.precio_venta)}%"
+                    except Exception:
+                        margen = "N/A"
+                    tabla.insert("", "end", values=(
+                        p.id_producto, p.nombre, p.marca,
+                        formatear_moneda(p.precio_compra),
+                        formatear_moneda(p.precio_venta),
+                        p.stock, margen,
+                    ))
+            except Exception as e:
+                # Si un producto falla, saltarlo y continuar con los demás
+                continue
 
     def _guardar():
         id_ed = _id_edicion["valor"]
@@ -153,6 +167,9 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
     btn_exito(fila_btns,     "💾 Guardar",  _guardar,  ancho=130, alto=36).pack(side="left", padx=(0, 8))
     btn_peligro(fila_btns,   "🗑 Eliminar", _eliminar, ancho=130, alto=36).pack(side="left", padx=(0, 8))
     btn_secundario(fila_btns, "✕ Limpiar",  _limpiar_form, ancho=100, alto=36).pack(side="left")
+
+    # Conectar botón Recargar ahora que _recargar_tabla está definida
+    btn_recargar.configure(command=_recargar_tabla)
 
     # Buscador reactivo
     entry_buscar.bind("<KeyRelease>", lambda e: _recargar_tabla(entry_buscar.get()))

@@ -19,8 +19,6 @@ class ClienteDAO:
     def __init__(self):
         self._db = DatabaseConnection()
 
-    # ── Métodos públicos ──────────────────────────────────────────────────────
-
     def insertar(self, cliente: Cliente) -> None:
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
@@ -77,12 +75,33 @@ class ClienteDAO:
             cursor.close()
 
     def eliminar(self, id_cliente) -> None:
+        """
+        Elimina cliente correctamente:
+        1. Primero borra la fila en 'cliente' (tabla hija)
+        2. Luego borra la fila en 'usuario' (tabla padre)
+        Esto evita errores de FK constraint.
+        """
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
-            cursor.execute("DELETE FROM usuario WHERE id_usuario=%s", (id_cliente,))
-            if cursor.rowcount == 0:
+            # Verificar que existe
+            cursor.execute(
+                "SELECT id_cliente FROM cliente WHERE id_cliente = %s",
+                (id_cliente,)
+            )
+            if not cursor.fetchone():
                 raise ClienteNoEncontradoError(id_cliente)
+
+            # Borrar tabla hija primero
+            cursor.execute(
+                "DELETE FROM cliente WHERE id_cliente = %s",
+                (id_cliente,)
+            )
+            # Luego tabla padre
+            cursor.execute(
+                "DELETE FROM usuario WHERE id_usuario = %s",
+                (id_cliente,)
+            )
             conexion.commit()
         except ClienteNoEncontradoError:
             raise
@@ -91,8 +110,6 @@ class ClienteDAO:
             self.__manejar_error(e, f"eliminar cliente {id_cliente}")
         finally:
             cursor.close()
-
-    # ── Privados de ayuda ─────────────────────────────────────────────────────
 
     @staticmethod
     def __manejar_error(error: Exception, operacion: str) -> None:

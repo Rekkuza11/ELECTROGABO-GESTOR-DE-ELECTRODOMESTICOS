@@ -2,14 +2,20 @@
 Vista: Gestión de Clientes.
 Responsabilidad: renderizar el CRUD de clientes dentro del frame de contenido
 del dashboard administrador.
+
+NOTA DE PRIVACIDAD: El administrador NO ingresa la contraseña del cliente.
+Se genera automáticamente una contraseña temporal que el cliente debe cambiar
+en su primer inicio de sesión.
 """
 
+import secrets
+import string
 import customtkinter as ctk
 from interface.controllers.cliente__controller import ClienteController
 from interface.components.cards import cabecera_vista, seccion_titulo
 from interface.components.tablas import crear_tabla, limpiar, fila_seleccionada
 from interface.components.formularios import (
-    campo_texto, campo_password, panel_formulario, limpiar_campos
+    campo_texto, panel_formulario, limpiar_campos
 )
 from interface.components.mensajes import LabelEstado, confirmar, exito, error as msg_error
 from interface.components.botones import btn_exito, btn_peligro, btn_secundario
@@ -19,6 +25,12 @@ _CTRL = ClienteController()
 
 _COLS   = ("ID", "Nombre", "Teléfono", "Dirección")
 _ANCHOS = [100, 220, 130, 260]
+
+
+def _generar_password_temporal(longitud: int = 10) -> str:
+    """Genera una contraseña temporal aleatoria segura."""
+    caracteres = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(caracteres) for _ in range(longitud))
 
 
 def abrir_gestionar_clientes(parent: ctk.CTkFrame) -> None:
@@ -33,7 +45,7 @@ def abrir_gestionar_clientes(parent: ctk.CTkFrame) -> None:
     layout = ctk.CTkFrame(parent, fg_color="transparent")
     layout.pack(fill="both", expand=True, padx=30, pady=(0, 20))
 
-    # ── Panel izquierdo — tabla 8387rcPNz8SRX6pYXgdxCZg3VMLFwtdJB3Z9LeX8Ge2n───
+    # ── Panel izquierdo — tabla ───────────────────────────────────────────────
     panel_izq = ctk.CTkFrame(layout, fg_color="transparent")
     panel_izq.pack(side="left", fill="both", expand=True, padx=(0, 10))
 
@@ -48,25 +60,38 @@ def abrir_gestionar_clientes(parent: ctk.CTkFrame) -> None:
     seccion_titulo(panel_izq, "📋 Listado de Clientes")
     tabla = crear_tabla(panel_izq, _COLS, altura=12, anchos=_ANCHOS, expandir=True)
 
-    # ── Panel derecho — formulario 8387rcPNz8SRX6pYXgdxCZg3VMLFwtdJB3Z9LeX8Ge2n
+    # ── Panel derecho — formulario ────────────────────────────────────────────
     panel_der = ctk.CTkFrame(layout, fg_color="transparent", width=340)
     panel_der.pack(side="right", fill="y")
     panel_der.pack_propagate(False)
 
     form_body = panel_formulario(panel_der, "➕ Registrar Nuevo Cliente")
 
-    entry_id       = campo_texto(form_body,    "ID Cliente:",  "Ej: CLI001")
-    entry_nombre   = campo_texto(form_body,    "Nombre:",      "Nombre completo")
-    entry_telefono = campo_texto(form_body,    "Teléfono:",    "Ej: 3001234567")
-    entry_dir      = campo_texto(form_body,    "Dirección:",   "Calle / barrio")
-    entry_pwd      = campo_password(form_body, "Contraseña:")
+    entry_id       = campo_texto(form_body, "ID Cliente:",  "Ej: CLI001")
+    entry_nombre   = campo_texto(form_body, "Nombre:",      "Nombre completo")
+    entry_telefono = campo_texto(form_body, "Teléfono:",    "Ej: 3001234567")
+    entry_dir      = campo_texto(form_body, "Dirección:",   "Calle / barrio")
+
+    # Aviso de privacidad — sin campo de contraseña
+    aviso = ctk.CTkFrame(form_body, fg_color="#f0f9ff", corner_radius=8)
+    aviso.pack(fill="x", pady=(6, 2))
+    ctk.CTkLabel(aviso,
+                 text="🔐  La contraseña se genera automáticamente.\n"
+                      "El cliente la recibirá y podrá cambiarla al ingresar.",
+                 font=("Arial", 10), text_color="#0369a1",
+                 justify="left").pack(anchor="w", padx=10, pady=8)
+
+    # Etiqueta para mostrar la contraseña generada tras el registro
+    lbl_pwd_generada = ctk.CTkLabel(form_body, text="", font=("Arial", 11),
+                                    text_color="#15803d", wraplength=280)
+    lbl_pwd_generada.pack(anchor="w", padx=4, pady=(2, 0))
 
     estado = LabelEstado(form_body)
 
     # ── Acciones ──────────────────────────────────────────────────────────────
     def _limpiar_form():
-        limpiar_campos(entry_id, entry_nombre, entry_telefono,
-                       entry_dir, entry_pwd)
+        limpiar_campos(entry_id, entry_nombre, entry_telefono, entry_dir)
+        lbl_pwd_generada.configure(text="")
         estado.limpiar()
 
     def _recargar_tabla(filtro: str = ""):
@@ -84,13 +109,19 @@ def abrir_gestionar_clientes(parent: ctk.CTkFrame) -> None:
                 ))
 
     def _registrar():
+        pwd_temp = _generar_password_temporal()
         try:
             _CTRL.agregar(
                 entry_id.get(), entry_nombre.get(),
-                entry_telefono.get(), entry_dir.get(), entry_pwd.get(),
+                entry_telefono.get(), entry_dir.get(), pwd_temp,
             )
             estado.mostrar("Cliente registrado correctamente.", "exito")
-            _limpiar_form()
+            lbl_pwd_generada.configure(
+                text=f"🔑 Contraseña temporal: {pwd_temp}\n"
+                     "(Entréguela al cliente de forma segura)"
+            )
+            # No limpiamos el form inmediatamente para que se vea la contraseña
+            limpiar_campos(entry_id, entry_nombre, entry_telefono, entry_dir)
             _recargar_tabla()
         except Exception as e:
             estado.mostrar(str(e), "error")
@@ -116,7 +147,8 @@ def abrir_gestionar_clientes(parent: ctk.CTkFrame) -> None:
         fila = fila_seleccionada(tabla)
         if not fila:
             return
-        limpiar_campos(entry_id, entry_nombre, entry_telefono, entry_dir, entry_pwd)
+        limpiar_campos(entry_id, entry_nombre, entry_telefono, entry_dir)
+        lbl_pwd_generada.configure(text="")
         entry_id.insert(0, str(fila[0]))
         entry_nombre.insert(0, str(fila[1]))
         entry_telefono.insert(0, str(fila[2]))

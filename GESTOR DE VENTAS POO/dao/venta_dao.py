@@ -42,18 +42,42 @@ class VentaDAO:
             cursor.close()
 
     def obtener_completo(self) -> list:
+        """
+        Retorna ventas con datos de cliente y empleado.
+        Calcula el total sumando los detalles como fallback por si
+        la columna 'total' no existe o tiene otro nombre en la BD.
+        """
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
-            cursor.execute("""
-                SELECT v.id_venta, v.fecha, v.total,
-                       c.nombre AS cliente,
-                       e.nombre AS empleado
-                FROM venta v
-                JOIN cliente c ON v.id_cliente = c.id_cliente
-                JOIN empleado e ON v.id_empleado = e.id_empleado
-            """)
-            return cursor.fetchall()
+            # Intentamos primero con la columna total directo
+            try:
+                cursor.execute("""
+                    SELECT v.id_venta, v.fecha,
+                           COALESCE(v.total, 0) AS total,
+                           c.nombre AS cliente,
+                           e.nombre AS empleado
+                    FROM venta v
+                    JOIN cliente c ON v.id_cliente = c.id_cliente
+                    JOIN empleado e ON v.id_empleado = e.id_empleado
+                    ORDER BY v.id_venta DESC
+                """)
+                return cursor.fetchall()
+            except Exception:
+                # Fallback: calcular total desde detalle_venta
+                cursor.execute("""
+                    SELECT v.id_venta, v.fecha,
+                           COALESCE(SUM(dv.subtotal), 0) AS total,
+                           c.nombre AS cliente,
+                           e.nombre AS empleado
+                    FROM venta v
+                    JOIN cliente c ON v.id_cliente = c.id_cliente
+                    JOIN empleado e ON v.id_empleado = e.id_empleado
+                    LEFT JOIN detalle_venta dv ON v.id_venta = dv.id_venta
+                    GROUP BY v.id_venta, v.fecha, c.nombre, e.nombre
+                    ORDER BY v.id_venta DESC
+                """)
+                return cursor.fetchall()
         except Exception as e:
             self.__manejar_error(e, "obtener ventas completas")
         finally:

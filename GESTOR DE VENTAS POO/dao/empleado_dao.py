@@ -48,6 +48,43 @@ class EmpleadoDAO:
         finally:
             cursor.close()
 
+    def eliminar(self, id_empleado) -> None:
+        """
+        Elimina empleado correctamente:
+        1. Primero borra la fila en 'empleado' (tabla hija)
+        2. Luego borra la fila en 'usuario' (tabla padre)
+        Esto evita errores de FK constraint.
+        """
+        conexion = self._db.obtener_conexion()
+        cursor = conexion.cursor()
+        try:
+            # Verificar que existe
+            cursor.execute(
+                "SELECT id_empleado FROM empleado WHERE id_empleado = %s",
+                (id_empleado,)
+            )
+            if not cursor.fetchone():
+                raise BaseDatosError(f"Error en 'eliminar empleado': No existe el empleado {id_empleado}")
+
+            # Borrar tabla hija primero
+            cursor.execute(
+                "DELETE FROM empleado WHERE id_empleado = %s",
+                (id_empleado,)
+            )
+            # Luego tabla padre
+            cursor.execute(
+                "DELETE FROM usuario WHERE id_usuario = %s",
+                (id_empleado,)
+            )
+            conexion.commit()
+        except BaseDatosError:
+            raise
+        except Exception as e:
+            conexion.rollback()
+            self.__manejar_error(e, f"eliminar empleado {id_empleado}")
+        finally:
+            cursor.close()
+
     @staticmethod
     def __manejar_error(error: Exception, operacion: str) -> None:
         mensaje = str(error)

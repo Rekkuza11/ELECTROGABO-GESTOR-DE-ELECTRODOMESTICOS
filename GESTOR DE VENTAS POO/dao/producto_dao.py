@@ -50,7 +50,15 @@ class ProductoDAO:
         cursor = conexion.cursor()
         try:
             cursor.execute(f"SELECT * FROM {self._tabla}")
-            return [Producto.desde_fila_bd(fila) for fila in cursor.fetchall()]
+            filas = cursor.fetchall()
+            productos = []
+            for fila in filas:
+                try:
+                    productos.append(Producto.desde_fila_bd(fila))
+                except Exception:
+                    # Si un producto tiene datos corruptos, saltarlo y continuar
+                    continue
+            return productos
         except Exception as e:
             self.__manejar_error(e, "obtener todos los productos")
         finally:

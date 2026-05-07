@@ -21,9 +21,7 @@ class ClienteController:
     def __init__(self):
         self._dao = ClienteDAO()
 
-    # ── Consultas ─────────────────────────────────────────────────────────────
-
-    def listar(self) -> list[Cliente]:
+    def listar(self) -> list:
         """Retorna todos los clientes registrados."""
         return self._dao.obtener_todos()
 
@@ -33,8 +31,6 @@ class ClienteController:
         Lanza ClienteNoEncontradoError si no existe.
         """
         return self._dao.obtener_por_id(id_cliente)
-
-    # ── Mutaciones ────────────────────────────────────────────────────────────
 
     def agregar(
         self,
@@ -46,10 +42,26 @@ class ClienteController:
     ) -> None:
         """
         Valida y registra un nuevo cliente.
-        Lanza ValidacionError si algún campo es inválido.
+        El password puede ser generado automáticamente por la vista (admin)
+        o ingresado directamente por el cliente en su propio portal.
+        Lanza ValidacionError si algún campo obligatorio está vacío.
         Lanza ClienteDuplicadoError si el ID ya existe.
         """
-        self._validar_campos(id_cliente, nombre, telefono, direccion, password)
+        # Validar sólo campos visibles al admin — password viene siempre del sistema
+        campos_obligatorios = {
+            "ID Cliente": id_cliente,
+            "Nombre":     nombre,
+            "Teléfono":   telefono,
+            "Dirección":  direccion,
+        }
+        for campo, valor in campos_obligatorios.items():
+            if not validar_no_vacio(valor):
+                raise ValidacionError(campo, "no puede estar vacío")
+
+        # El password viene generado; mínimo seguro de 4 chars
+        if not password or len(str(password).strip()) < 4:
+            raise ValidacionError("Contraseña", "debe tener al menos 4 caracteres")
+
         cliente = Cliente(
             nombre.strip(),
             telefono.strip(),
@@ -65,21 +77,3 @@ class ClienteController:
         Lanza ClienteNoEncontradoError si no existe.
         """
         self._dao.eliminar(id_cliente)
-
-    # ── Validación privada ────────────────────────────────────────────────────
-
-    @staticmethod
-    def _validar_campos(id_c, nombre, telefono, direccion, password) -> None:
-        campos = {
-            "ID Cliente": id_c,
-            "Nombre":     nombre,
-            "Teléfono":   telefono,
-            "Dirección":  direccion,
-            "Contraseña": password,
-        }
-        for campo, valor in campos.items():
-            if not validar_no_vacio(valor):
-                raise ValidacionError(campo, "no puede estar vacío")
-
-        if len(str(password).strip()) < 4:
-            raise ValidacionError("Contraseña", "debe tener al menos 4 caracteres")
