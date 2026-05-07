@@ -2,7 +2,7 @@
 Vista: Login.
 Responsabilidad: autenticar al usuario contra la BD y redirigir
 al dashboard correspondiente según su tipo (admin, empleado, cliente).
-Diseño: fondo azul sólido, card blanca centrada, ícono con badge superior.
+Diseño: fondo azul sólido, card blanca centrada con pack, ícono badge superior.
 """
 
 import customtkinter as ctk
@@ -15,7 +15,7 @@ _AZUL_FONDO   = "#2563eb"
 _AZUL_BADGE   = "#dbeafe"
 _AZUL_ICONO   = "#2563eb"
 _AZUL_BTN     = "#3b82f6"
-_AZUL_BTN_HOV = "#2563eb"
+_AZUL_BTN_HOV = "#1d4ed8"
 _TEXTO_TITULO = "#1e293b"
 _TEXTO_SUB    = "#64748b"
 _TEXTO_LABEL  = "#374151"
@@ -33,34 +33,39 @@ class LoginView(ctk.CTkFrame):
     # ── UI ────────────────────────────────────────────────────────────────────
 
     def _construir_ui(self):
-        # Card blanca centrada
+
+        # Fila que ocupa todo el alto para centrar verticalmente la card
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+
+        # Card blanca
         card = ctk.CTkFrame(
             self,
             fg_color="white",
             corner_radius=18,
             width=420,
         )
-        card.place(relx=0.5, rely=0.5, anchor="center")
-        card.pack_propagate(False)
+        card.grid(row=0, column=0)
+        card.grid_propagate(False)
 
         # ── Badge con ícono ───────────────────────────────────────────────────
-        badge_outer = ctk.CTkFrame(
+        badge = ctk.CTkFrame(
             card,
             fg_color=_AZUL_BADGE,
             corner_radius=999,
             width=72, height=72,
         )
-        badge_outer.pack(pady=(36, 0))
-        badge_outer.pack_propagate(False)
+        badge.pack(pady=(36, 0))
+        badge.pack_propagate(False)
 
         ctk.CTkLabel(
-            badge_outer,
+            badge,
             text="⚡",
-            font=("Arial", 28),
+            font=("Arial", 30),
             text_color=_AZUL_ICONO,
-        ).place(relx=0.5, rely=0.5, anchor="center")
+        ).pack(expand=True)
 
-        # ── Títulos ───────────────────────────────────────────────────────────
+        # ── Título y subtítulo ────────────────────────────────────────────────
         ctk.CTkLabel(
             card,
             text="ElectroGestión",
@@ -73,30 +78,72 @@ class LoginView(ctk.CTkFrame):
             text="Sistema de Gestión de Electrodomésticos",
             font=("Arial", 12),
             text_color=_TEXTO_SUB,
-        ).pack(pady=(0, 24))
+        ).pack(pady=(0, 20))
 
-        # ── Campos ───────────────────────────────────────────────────────────
-        _label(card, "Usuario")
-        self.entry_user = _input(card, "Ingrese su usuario")
+        # ── Campo Usuario ─────────────────────────────────────────────────────
+        ctk.CTkLabel(
+            card,
+            text="Usuario",
+            font=("Arial", 13, "bold"),
+            text_color=_TEXTO_LABEL,
+            anchor="w",
+        ).pack(anchor="w", padx=40, pady=(0, 4))
 
-        _label(card, "Contraseña", pady_top=14)
-        self.entry_pass = _input(card, "Ingrese su contraseña", oculto=True)
+        self.entry_user = ctk.CTkEntry(
+            card,
+            placeholder_text="Ingrese su usuario",
+            width=340,
+            height=44,
+            font=("Arial", 13),
+            border_color=_BORDE_INPUT,
+            border_width=1,
+            corner_radius=8,
+            fg_color="white",
+            text_color=_TEXTO_TITULO,
+        )
+        self.entry_user.pack(padx=40)
+
+        # ── Campo Contraseña ──────────────────────────────────────────────────
+        ctk.CTkLabel(
+            card,
+            text="Contraseña",
+            font=("Arial", 13, "bold"),
+            text_color=_TEXTO_LABEL,
+            anchor="w",
+        ).pack(anchor="w", padx=40, pady=(14, 4))
+
+        self.entry_pass = ctk.CTkEntry(
+            card,
+            placeholder_text="Ingrese su contraseña",
+            show="*",
+            width=340,
+            height=44,
+            font=("Arial", 13),
+            border_color=_BORDE_INPUT,
+            border_width=1,
+            corner_radius=8,
+            fg_color="white",
+            text_color=_TEXTO_TITULO,
+        )
+        self.entry_pass.pack(padx=40)
         self.entry_pass.bind("<Return>", lambda e: self._login())
 
-        # ── Error ─────────────────────────────────────────────────────────────
+        # ── Mensaje de error ──────────────────────────────────────────────────
         self.lbl_error = ctk.CTkLabel(
-            card, text="",
+            card,
+            text="",
             font=("Arial", 11),
             text_color="#dc2626",
         )
         self.lbl_error.pack(pady=(8, 0))
 
-        # ── Botón ─────────────────────────────────────────────────────────────
+        # ── Botón Iniciar Sesión ──────────────────────────────────────────────
         ctk.CTkButton(
             card,
             text="Iniciar Sesión",
             command=self._login,
-            width=340, height=46,
+            width=340,
+            height=46,
             fg_color=_AZUL_BTN,
             hover_color=_AZUL_BTN_HOV,
             text_color="white",
@@ -104,7 +151,7 @@ class LoginView(ctk.CTkFrame):
             corner_radius=10,
         ).pack(padx=40, pady=(12, 40))
 
-    # ── Lógica ────────────────────────────────────────────────────────────────
+    # ── Lógica de autenticación ───────────────────────────────────────────────
 
     def _login(self):
         usuario  = self.entry_user.get().strip()
@@ -145,32 +192,3 @@ class LoginView(ctk.CTkFrame):
 
     def _mostrar_error(self, mensaje: str):
         self.lbl_error.configure(text=mensaje, text_color="#dc2626")
-
-
-# ── Helpers internos del login ────────────────────────────────────────────────
-
-def _label(parent, texto: str, pady_top: int = 0) -> None:
-    ctk.CTkLabel(
-        parent,
-        text=texto,
-        font=("Arial", 13, "bold"),
-        text_color=_TEXTO_LABEL,
-        anchor="w",
-    ).pack(anchor="w", padx=40, pady=(pady_top, 4))
-
-
-def _input(parent, placeholder: str, oculto: bool = False) -> ctk.CTkEntry:
-    entry = ctk.CTkEntry(
-        parent,
-        placeholder_text=placeholder,
-        width=340, height=44,
-        font=("Arial", 13),
-        border_color=_BORDE_INPUT,
-        border_width=1,
-        corner_radius=8,
-        show="*" if oculto else "",
-        fg_color="white",
-        text_color=_TEXTO_TITULO,
-    )
-    entry.pack(padx=40)
-    return entry
