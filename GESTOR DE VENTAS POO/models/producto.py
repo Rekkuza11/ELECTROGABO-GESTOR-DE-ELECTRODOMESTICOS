@@ -90,8 +90,21 @@ class Producto:
 
     @classmethod
     def desde_fila_bd(cls, fila: tuple) -> "Producto":
-        """Fábrica: (id, nombre, marca, precio_compra, precio_venta, stock)"""
+        """
+        Fábrica: (id, nombre, marca, precio_compra, precio_venta, stock)
+        Tolerante a precios 0 o negativos que vengan de la BD:
+        los normaliza a 0.01 para no romper la carga del inventario.
+        """
         id_p, nombre, marca, p_compra, p_venta, stock = fila
+        # Normalizar precios: si vienen como 0 o negativos desde BD, usar mínimo 0.01
+        try:
+            p_compra = float(p_compra) if float(p_compra) > 0 else 0.01
+        except (ValueError, TypeError):
+            p_compra = 0.01
+        try:
+            p_venta = float(p_venta) if float(p_venta) > 0 else 0.01
+        except (ValueError, TypeError):
+            p_venta = 0.01
         return cls(nombre, marca, p_compra, p_venta, stock, id_p)
 
     # ── Métodos estáticos ────────────────────────────────────────────────────
