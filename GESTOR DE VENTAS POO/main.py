@@ -3,11 +3,11 @@ from config.database import DatabaseConnection
 
 def main():
     try:
-        # Conexión BD
+        
         db = DatabaseConnection()
         db.connect()
 
-        # Ejecutar app
+     
         app = App()
         app.mainloop()
 
