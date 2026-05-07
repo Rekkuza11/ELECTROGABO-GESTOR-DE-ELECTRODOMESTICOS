@@ -20,7 +20,7 @@ class App(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         # Fondo azul igual al LoginView para no ver bordes
-        self.configure(fg_color="#2563eb")
+        self.configure(fg_color="#3669d6")
 
         self._cargar_login()
 
