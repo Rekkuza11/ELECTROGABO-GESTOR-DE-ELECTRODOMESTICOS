@@ -27,11 +27,14 @@ class DatabaseConnection:
     _lock: threading.Lock = threading.Lock()
 
     _config: dict = {
-        "user":     "root",
-        "password": "admin123",
-        "host":     "localhost",
+        "user":     "2XTfztzfJARuHio.root",
+        "password": "X1cF7w1hZSFemDJW",
+        "host":     "gateway01.us-east-1.prod.aws.tidbcloud.com",
         "database": "base_datos_electrogabo",
-        "port":     3306,
+        "port":     4000,
+        "ssl_ca": r"certs\isrgrootx1.pem",
+        "ssl_verify_cert": True,
+        "ssl_verify_identity": True,
     }
 
     # ── Singleton ────────────────────────────────────────────────────────────
