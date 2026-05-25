@@ -1,7 +1,7 @@
 """
 Vista: Ventas (Empleado).
 Responsabilidad: permitir al empleado registrar nuevas ventas mediante
-un carrito de compras. El empleado NO puede eliminar ventas ya registradas.
+carrito de compras. El empleado NO PUEDE eliminar ventas ya registradas.
 """
 
 import customtkinter as ctk
