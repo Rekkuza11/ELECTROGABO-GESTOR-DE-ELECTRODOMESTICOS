@@ -24,20 +24,12 @@ class ProductoController:
     # ── Consultas ─────────────────────────────────────────────────────────────
 
     def listar(self) -> list[Producto]:
-        """Retorna todos los productos del inventario."""
         return self._dao.obtener_todos()
 
     def obtener(self, id_producto) -> Producto:
-        """
-        Retorna un producto por ID.
-        Lanza ProductoNoEncontradoError si no existe.
-        """
         return self._dao.obtener_por_id(id_producto)
 
     def listar_para_combo(self) -> list[str]:
-        """
-        Retorna lista de strings 'ID — Nombre (Stock: N)' para ComboBoxes.
-        """
         productos = self.listar()
         return [
             f"{p.id_producto} — {p.nombre}  (Stock: {p.stock})"
@@ -48,6 +40,7 @@ class ProductoController:
 
     def agregar(
         self,
+        id_producto: str,
         nombre: str,
         marca: str,
         precio_compra: str,
@@ -55,16 +48,17 @@ class ProductoController:
         stock: str,
     ) -> None:
         """
-        Valida y registra un nuevo producto.
-        Lanza ValidacionError o PrecioInvalidoError si los datos son inválidos.
+        Valida y registra un nuevo producto con ID manual obligatorio.
+        Lanza ValidacionError si algún campo es inválido.
         """
+        id_p = self._validar_id(id_producto)
         self._validar_texto(nombre, "Nombre")
         self._validar_texto(marca, "Marca")
         pc = self._validar_precio(precio_compra, "Precio Compra")
         pv = self._validar_precio(precio_venta, "Precio Venta")
         st = self._validar_stock(stock)
 
-        producto = Producto(nombre.strip(), marca.strip(), pc, pv, st)
+        producto = Producto(nombre.strip(), marca.strip(), pc, pv, st, id_p)
         self._dao.insertar(producto)
 
     def actualizar(
@@ -76,10 +70,6 @@ class ProductoController:
         precio_venta: str,
         stock: str,
     ) -> None:
-        """
-        Valida y actualiza un producto existente.
-        Lanza ProductoNoEncontradoError si el ID no existe.
-        """
         self._validar_texto(nombre, "Nombre")
         self._validar_texto(marca, "Marca")
         pc = self._validar_precio(precio_compra, "Precio Compra")
@@ -90,13 +80,23 @@ class ProductoController:
         self._dao.actualizar(producto)
 
     def eliminar(self, id_producto) -> None:
-        """
-        Elimina un producto por ID.
-        Lanza ProductoNoEncontradoError si no existe.
-        """
         self._dao.eliminar(id_producto)
 
     # ── Validaciones privadas ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _validar_id(valor: str):
+        """ID numérico entero positivo, obligatorio."""
+        val = str(valor).strip()
+        if not val:
+            raise ValidacionError("ID Producto", "no puede estar vacío")
+        try:
+            id_p = int(val)
+        except ValueError:
+            raise ValidacionError("ID Producto", "debe ser un número entero")
+        if id_p <= 0:
+            raise ValidacionError("ID Producto", "debe ser mayor que cero")
+        return id_p
 
     @staticmethod
     def _validar_texto(valor: str, campo: str) -> str:

@@ -20,25 +20,25 @@ from exceptions import (
 class ProductoDAO:
     """Objeto de acceso a datos para la entidad Producto."""
 
-    # ── Miembro protegido de clase ────────────────────────────────────────────
     _tabla: str = "producto"
 
     def __init__(self):
-        self._db = DatabaseConnection()   # protegido: accesible en subclases
-
-    # ── Métodos públicos ──────────────────────────────────────────────────────
+        self._db = DatabaseConnection()
 
     def insertar(self, producto: Producto) -> None:
+        if producto.id_producto is None:
+            raise BaseDatosError(
+                "Error en 'insertar producto': se requiere un ID de producto."
+            )
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
             sql = """
-                INSERT INTO producto (nombre, marca, precio_compra, precio_venta, stock)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO producto (id_producto, nombre, marca, precio_compra, precio_venta, stock)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """
-            cursor.execute(sql, self.__a_valores(producto))
+            cursor.execute(sql, (producto.id_producto,) + self.__a_valores(producto))
             conexion.commit()
-            producto.id_producto = cursor.lastrowid
         except Exception as e:
             conexion.rollback()
             self.__manejar_error(e, "insertar producto")
@@ -56,7 +56,6 @@ class ProductoDAO:
                 try:
                     productos.append(Producto.desde_fila_bd(fila))
                 except Exception:
-                    # Si un producto tiene datos corruptos, saltarlo y continuar
                     continue
             return productos
         except Exception as e:
@@ -143,11 +142,8 @@ class ProductoDAO:
         finally:
             cursor.close()
 
-    # ── Métodos privados de ayuda ─────────────────────────────────────────────
-
     @staticmethod
     def __a_valores(producto: Producto) -> tuple:
-        """Extrae los valores del objeto en orden para los parámetros SQL."""
         return (
             producto.nombre,
             producto.marca,
@@ -158,10 +154,6 @@ class ProductoDAO:
 
     @staticmethod
     def __manejar_error(error: Exception, operacion: str) -> None:
-        """
-        Traduce errores de infraestructura a excepciones de dominio.
-        Lanza BaseDatosError o IntegridadDatosError según el tipo de error.
-        """
         mensaje = str(error)
         if "Duplicate entry" in mensaje or "foreign key" in mensaje.lower():
             raise IntegridadDatosError(mensaje) from error
