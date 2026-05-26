@@ -1,6 +1,13 @@
 """
 DAO Venta.
 Aplica Singleton de DB, excepciones especializadas.
+
+CORRECCIÓN:
+- obtener_completo usa LEFT JOIN con empleado y LEFT JOIN con usuario
+  para que las ventas registradas por un administrador (que no tiene fila
+  en la tabla `empleado`) también aparezcan en el historial.
+  El nombre del vendedor se resuelve con COALESCE: primero intenta el
+  nombre del empleado, luego el id_usuario del admin.
 """
 
 from database import DatabaseConnection
@@ -43,38 +50,52 @@ class VentaDAO:
 
     def obtener_completo(self) -> list:
         """
-        Retorna ventas con datos de cliente y empleado.
-        Calcula el total sumando los detalles como fallback por si
-        la columna 'total' no existe o tiene otro nombre en la BD.
+        Retorna ventas con datos de cliente y vendedor.
+
+        Usa LEFT JOIN con empleado y LEFT JOIN con usuario para cubrir
+        dos casos:
+          - Vendedor es un empleado  → muestra e.nombre
+          - Vendedor es un admin     → no tiene fila en `empleado`, muestra
+                                       u.id_usuario como identificador
+
+        COALESCE elige el primer valor no nulo: nombre del empleado o, si
+        no existe, el id del usuario (admin).
         """
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
-            # Intentamos primero con la columna total directo
             try:
                 cursor.execute("""
-                    SELECT v.id_venta, v.fecha,
-                           COALESCE(v.total, 0) AS total,
-                           c.nombre AS cliente,
-                           e.nombre AS empleado
+                    SELECT
+                        v.id_venta,
+                        v.fecha,
+                        COALESCE(v.total, 0)                        AS total,
+                        c.nombre                                     AS cliente,
+                        COALESCE(e.nombre, CONCAT(u.id_usuario, ' (Admin)'))
+                                                                     AS vendedor
                     FROM venta v
-                    JOIN cliente c ON v.id_cliente = c.id_cliente
-                    JOIN empleado e ON v.id_empleado = e.id_empleado
+                    JOIN  cliente  c ON v.id_cliente  = c.id_cliente
+                    JOIN  usuario  u ON v.id_empleado = u.id_usuario
+                    LEFT  JOIN empleado e ON v.id_empleado = e.id_empleado
                     ORDER BY v.id_venta DESC
                 """)
                 return cursor.fetchall()
             except Exception:
                 # Fallback: calcular total desde detalle_venta
                 cursor.execute("""
-                    SELECT v.id_venta, v.fecha,
-                           COALESCE(SUM(dv.subtotal), 0) AS total,
-                           c.nombre AS cliente,
-                           e.nombre AS empleado
+                    SELECT
+                        v.id_venta,
+                        v.fecha,
+                        COALESCE(SUM(dv.subtotal), 0)               AS total,
+                        c.nombre                                     AS cliente,
+                        COALESCE(e.nombre, CONCAT(u.id_usuario, ' (Admin)'))
+                                                                     AS vendedor
                     FROM venta v
-                    JOIN cliente c ON v.id_cliente = c.id_cliente
-                    JOIN empleado e ON v.id_empleado = e.id_empleado
-                    LEFT JOIN detalle_venta dv ON v.id_venta = dv.id_venta
-                    GROUP BY v.id_venta, v.fecha, c.nombre, e.nombre
+                    JOIN  cliente  c  ON v.id_cliente  = c.id_cliente
+                    JOIN  usuario  u  ON v.id_empleado = u.id_usuario
+                    LEFT  JOIN empleado    e  ON v.id_empleado  = e.id_empleado
+                    LEFT  JOIN detalle_venta dv ON v.id_venta   = dv.id_venta
+                    GROUP BY v.id_venta, v.fecha, c.nombre, e.nombre, u.id_usuario
                     ORDER BY v.id_venta DESC
                 """)
                 return cursor.fetchall()

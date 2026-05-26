@@ -2,6 +2,11 @@
 Vista: Ventas (Empleado).
 Responsabilidad: permitir al empleado registrar nuevas ventas mediante
 un carrito de compras. El empleado NO puede eliminar ventas ya registradas.
+
+CORRECCIONES:
+- id_prod se convierte a int al parsear el combo (igual que en gestionar_ventas.py)
+  para que ProductoDAO y actualizar_stock hagan match con la PK en BD.
+- items pasados al controller ya llevan el id_prod normalizado desde el carrito.
 """
 
 import customtkinter as ctk
@@ -22,7 +27,7 @@ from dao.cliente_dao import ClienteDAO
 _CTRL_VENTA = VentaController()
 _CTRL_PROD  = ProductoController()
 
-_COLS_HIST  = ("ID", "Fecha", "Total", "Cliente")
+_COLS_HIST   = ("ID", "Fecha", "Total", "Cliente")
 _ANCHOS_HIST = [60, 160, 120, 200]
 
 
@@ -37,7 +42,6 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
         f"Registra nuevas ventas — sesión empleado: {id_empleado}",
     )
 
-    # Aviso de permisos
     aviso = ctk.CTkFrame(parent, fg_color="#f0f9ff", corner_radius=8)
     aviso.pack(fill="x", padx=30, pady=(0, 10))
     ctk.CTkLabel(
@@ -46,12 +50,11 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
         font=("Arial", 11), text_color="#0369a1", anchor="w",
     ).pack(anchor="w", padx=16, pady=8)
 
-    # ── Layout: izquierda historial / derecha nueva venta ─────────────────────
     layout = ctk.CTkFrame(parent, fg_color="transparent")
     layout.pack(fill="both", expand=True, padx=30, pady=(0, 20))
 
     # ══════════════════════════════════════════════════════════════════════════
-    # Panel izquierdo — Historial (solo las ventas del empleado)
+    # Panel izquierdo — Historial del empleado
     # ══════════════════════════════════════════════════════════════════════════
     panel_hist = ctk.CTkFrame(layout, fg_color="transparent")
     panel_hist.pack(side="left", fill="both", expand=True, padx=(0, 12))
@@ -66,17 +69,13 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
     )
     entry_buscar.pack(side="left", padx=12, pady=10)
 
-    lbl_conteo = ctk.CTkLabel(
-        barra_hist, text="",
-        font=("Arial", 11), text_color="#64748b",
-    )
+    lbl_conteo = ctk.CTkLabel(barra_hist, text="", font=("Arial", 11), text_color="#64748b")
     lbl_conteo.pack(side="right", padx=12)
 
     seccion_titulo(panel_hist, "📋 Mis Ventas Registradas")
     tabla_hist = crear_tabla(panel_hist, _COLS_HIST, altura=14,
                              anchos=_ANCHOS_HIST, expandir=True)
 
-    # ── Resumen del empleado ──────────────────────────────────────────────────
     resumen_frame = ctk.CTkFrame(panel_hist, fg_color="white", corner_radius=10)
     resumen_frame.pack(fill="x", pady=(8, 0))
 
@@ -93,7 +92,6 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
     panel_nueva.pack(side="right", fill="y")
     panel_nueva.pack_propagate(False)
 
-    # ── Datos de la venta ─────────────────────────────────────────────────────
     form_venta = panel_formulario(panel_nueva, "🧾 Nueva Venta")
 
     try:
@@ -161,8 +159,7 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
             return
 
         for i, item in enumerate(_carrito):
-            fila = ctk.CTkFrame(scroll_carrito, fg_color="#f0fdff",
-                                corner_radius=6)
+            fila = ctk.CTkFrame(scroll_carrito, fg_color="#f0fdff", corner_radius=6)
             fila.pack(fill="x", pady=2)
 
             ctk.CTkLabel(fila,
@@ -172,8 +169,7 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
 
             ctk.CTkLabel(fila,
                          text=f"x{item['cantidad']}  ·  {formatear_moneda(item['subtotal'])}",
-                         font=("Arial", 11), text_color="#64748b").pack(
-                             side="left", padx=4)
+                         font=("Arial", 11), text_color="#64748b").pack(side="left", padx=4)
 
             idx = i
             ctk.CTkButton(fila, text="✕", width=28, height=28,
@@ -191,7 +187,7 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
             estado_venta.limpiar()
 
     def _agregar_al_carrito():
-        sel = combo_prod.get()
+        sel      = combo_prod.get()
         cant_str = entry_cant.get().strip()
 
         if not sel:
@@ -205,7 +201,12 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
             estado_prod.mostrar("Ingresa una cantidad válida.", "error")
             return
 
-        id_prod = sel.split(" — ")[0].strip()
+        # CORRECCIÓN: convertir id_prod a int para que coincida con la PK en BD
+        id_prod_str = sel.split(" — ")[0].strip()
+        try:
+            id_prod = int(id_prod_str)
+        except ValueError:
+            id_prod = id_prod_str
 
         try:
             prod = _CTRL_PROD.obtener(id_prod)
@@ -218,7 +219,6 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
                 f"Stock insuficiente. Disponible: {prod.stock}", "error")
             return
 
-        # Si ya está en carrito, sumar cantidad
         for item in _carrito:
             if item["id_prod"] == id_prod:
                 nueva_cant = item["cantidad"] + cant
@@ -235,7 +235,7 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
                 return
 
         _carrito.append({
-            "id_prod":  id_prod,
+            "id_prod":  id_prod,          # int normalizado
             "nombre":   prod.nombre,
             "cantidad": cant,
             "precio":   prod.precio_venta,
@@ -257,8 +257,9 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
             return
 
         id_cli = sel_cli.split(" — ")[0].strip()
-        items  = [(item["id_prod"], item["cantidad"]) for item in _carrito]
-        total  = sum(item["subtotal"] for item in _carrito)
+        # CORRECCIÓN: usar los id_prod ya normalizados (int) del carrito
+        items = [(item["id_prod"], item["cantidad"]) for item in _carrito]
+        total = sum(item["subtotal"] for item in _carrito)
 
         if not confirmar("Confirmar venta",
                          f"¿Registrar venta por {formatear_moneda(total)}?\n"
@@ -284,16 +285,9 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
         combo_cli.set("")
         estado_venta.limpiar()
 
-    # ── Recarga del historial ─────────────────────────────────────────────────
+    # ── Recarga del historial del empleado ────────────────────────────────────
     def _recargar_historial(filtro: str = ""):
         limpiar(tabla_hist)
-        try:
-            todas_ventas = _CTRL_VENTA.listar()
-        except Exception as e:
-            msg_error("Error", str(e))
-            return
-
-        # Filtrar por id_empleado (columna 4 = empleado nombre, usamos el dao directo)
         try:
             from database import DatabaseConnection
             conn = DatabaseConnection().obtener_conexion()
@@ -308,8 +302,10 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
             mis_ventas = cur.fetchall()
             cur.close()
         except Exception:
-            # Fallback: mostrar todas
-            mis_ventas = [(r[0], r[1], r[2], r[3]) for r in todas_ventas]
+            try:
+                mis_ventas = [(r[0], r[1], r[2], r[3]) for r in _CTRL_VENTA.listar()]
+            except Exception:
+                mis_ventas = []
 
         filtro_lower = filtro.strip().lower()
         total_acum   = 0.0
