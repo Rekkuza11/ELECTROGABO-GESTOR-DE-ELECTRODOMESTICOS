@@ -96,9 +96,9 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
     # ══════════════════════════════════════════════════════════════════════════
     # Panel derecho — Nueva Venta
     # ══════════════════════════════════════════════════════════════════════════
-    panel_nueva = ctk.CTkFrame(layout, fg_color="transparent", width=400)
+    panel_nueva = ctk.CTkScrollableFrame(layout, fg_color="transparent", width=400)
     panel_nueva.pack(side="right", fill="y")
-    panel_nueva.pack_propagate(False)
+    
 
     # ── Datos de la venta ─────────────────────────────────────────────────────
     form_venta = panel_formulario(panel_nueva, "🧾 Nueva Venta")
@@ -166,7 +166,7 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
     ctk.CTkFrame(carrito_frame, height=1, fg_color="#e2e8f0").pack(fill="x")
 
     scroll_carrito = ctk.CTkScrollableFrame(carrito_frame, fg_color="transparent",
-                                            height=160)
+                                            height=80)
     scroll_carrito.pack(fill="x", padx=10, pady=5)
 
     lbl_total = ctk.CTkLabel(carrito_frame,
@@ -317,12 +317,13 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
             _carrito.clear()
             _redibujar_carrito()
             combo_cli.set("")
-            # Mantener el empleado pre-seleccionado si había sesión activa
             if not id_empleado_sesion:
                 combo_emp.set("")
             estado_venta.mostrar(f"Venta #{id_venta} completada.", "exito")
             _recargar_historial()
         except Exception as e:
+            import traceback
+            traceback.print_exc()   # ← línea nueva
             estado_venta.mostrar(str(e), "error")
 
     def _limpiar_carrito():
