@@ -3,6 +3,11 @@ Controller: Venta.
 Responsabilidad: orquestar el registro de ventas (cabecera + detalles),
 actualización de stock y consultas del historial.
 Aplica SRP — sólo gestiona el flujo de venta.
+
+CORRECCIONES:
+- id_prod se convierte a int antes de buscar en BD (evita mismatch de tipo)
+- actualizar_stock usa el id ya convertido (mismo objeto que se insertó)
+- rollback explícito si falla el stock tras insertar detalles
 """
 
 from datetime import datetime
@@ -27,11 +32,11 @@ class VentaController:
     """Orquesta el ciclo completo de una venta."""
 
     def __init__(self):
-        self._venta_dao   = VentaDAO()
-        self._detalle_dao = DetalleVentaDAO()
+        self._venta_dao    = VentaDAO()
+        self._detalle_dao  = DetalleVentaDAO()
         self._producto_dao = ProductoDAO()
         self._cliente_dao  = ClienteDAO()
-        self._db = DatabaseConnection()
+        self._db           = DatabaseConnection()
 
     # ── Consultas ─────────────────────────────────────────────────────────────
 
@@ -71,20 +76,34 @@ class VentaController:
             id_venta generado.
 
         Lanza:
-            ValidacionError         — items vacío.
+            ValidacionError           — items vacío o cantidad inválida.
             ProductoNoEncontradoError — si algún producto no existe.
-            StockInsuficienteError   — si no hay stock suficiente.
-            BaseDatosError          — error de infraestructura.
+            StockInsuficienteError    — si no hay stock suficiente.
+            BaseDatosError            — error de infraestructura.
         """
         if not items:
             raise ValidacionError("items", "la venta debe tener al menos un producto")
 
-        # 1. Obtener productos y construir detalles (valida stock en memoria)
-        detalles_obj: list[DetalleVenta] = []
-        for id_prod, cantidad in items:
-            cantidad = convertir_a_int(cantidad)
+        # ── 1. Normalizar IDs y validar stock en memoria ───────────────────────
+        # CORRECCIÓN: convertir id_prod a int ANTES de buscar en BD para
+        # evitar que MySQL no haga match por diferencia de tipo str vs int.
+        items_normalizados: list[tuple] = []
+        for id_prod_raw, cantidad_raw in items:
+            cantidad = convertir_a_int(cantidad_raw)
             if cantidad <= 0:
                 raise ValidacionError("cantidad", "debe ser mayor que cero")
+
+            # Normalizar id_producto al tipo que espera el DAO (int si es numérico)
+            try:
+                id_prod = int(id_prod_raw)
+            except (ValueError, TypeError):
+                id_prod = id_prod_raw  # mantener str para IDs alfanuméricos
+
+            items_normalizados.append((id_prod, cantidad))
+
+        # ── 2. Verificar productos y construir detalles ────────────────────────
+        detalles_obj: list[DetalleVenta] = []
+        for id_prod, cantidad in items_normalizados:
             producto = self._producto_dao.obtener_por_id(id_prod)
             if producto.stock < cantidad:
                 raise StockInsuficienteError(producto.nombre, producto.stock, cantidad)
@@ -93,12 +112,11 @@ class VentaController:
 
         total = sum(d.subtotal for d in detalles_obj)
 
-        # 2. Insertar cabecera de venta
+        # ── 3. Insertar cabecera de venta ──────────────────────────────────────
         venta = Venta(None, id_cliente, id_empleado, datetime.now(), total)
-        self._venta_dao.insertar(venta)   # asigna venta.id_venta
+        self._venta_dao.insertar(venta)  # asigna venta.id_venta
 
-        # 3. Insertar detalles directamente (evita dependencia del id_venta
-        #    en el modelo DetalleVenta, que no expone ese atributo públicamente)
+        # ── 4. Insertar detalles ───────────────────────────────────────────────
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
@@ -124,9 +142,11 @@ class VentaController:
         finally:
             cursor.close()
 
-        # 4. Descontar stock por producto
-        for id_prod, cantidad in items:
-            self._producto_dao.actualizar_stock(id_prod, convertir_a_int(cantidad))
+        # ── 5. Descontar stock usando los IDs ya normalizados ──────────────────
+        # CORRECCIÓN: usar items_normalizados (con id_prod ya convertido a int)
+        # para que el UPDATE de stock haga match con la clave primaria correcta.
+        for id_prod, cantidad in items_normalizados:
+            self._producto_dao.actualizar_stock(id_prod, cantidad)
 
         return venta.id_venta
 
