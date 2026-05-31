@@ -1,7 +1,14 @@
 """
-Vista: Gestión de Ventas.
+Vista: Gestión de Ventas (Administrador).
 Responsabilidad: registrar nuevas ventas (carrito + cliente + empleado)
 y consultar el historial completo de transacciones.
+
+CORRECCIONES:
+- _agregar_al_carrito: id_prod se guarda como int (no str) para evitar
+  mismatch de tipo al llamar al controller/DAO.
+- _confirmar_venta: validación explícita de campos antes de llamar registrar().
+- combo_emp pre-seleccionado con el empleado de sesión si se recibe id_empleado_sesion.
+- Manejo de excepción más granular para mostrar mensajes útiles al usuario.
 """
 
 import customtkinter as ctk
@@ -17,10 +24,10 @@ from dao.cliente_dao import ClienteDAO
 from dao.empleado_dao import EmpleadoDAO
 
 
-_CTRL_VENTA   = VentaController()
-_CTRL_PROD    = ProductoController()
+_CTRL_VENTA = VentaController()
+_CTRL_PROD  = ProductoController()
 
-_COLS_HIST  = ("ID", "Fecha", "Total", "Cliente", "Empleado")
+_COLS_HIST   = ("ID", "Fecha", "Total", "Cliente", "Empleado")
 _ANCHOS_HIST = [60, 160, 110, 180, 160]
 
 
@@ -33,7 +40,6 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
                    "🛒 Gestión de Ventas",
                    "Registra nuevas ventas y consulta el historial de transacciones")
 
-    # ── Layout principal: izquierda historial / derecha nueva venta ───────────
     layout = ctk.CTkFrame(parent, fg_color="transparent")
     layout.pack(fill="both", expand=True, padx=30, pady=(0, 20))
 
@@ -47,7 +53,6 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
     tabla_hist = crear_tabla(panel_hist, _COLS_HIST, altura=14,
                              anchos=_ANCHOS_HIST, expandir=True)
 
-    # ── Acciones sobre historial 8387rcPNz8SRX6pYXgdxCZg3VMLFwtdJB3Z9LeX8Ge2n──
     barra_hist = ctk.CTkFrame(panel_hist, fg_color="white", corner_radius=10)
     barra_hist.pack(fill="x", pady=(8, 0))
 
@@ -85,53 +90,73 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
 
     fila_acc = ctk.CTkFrame(barra_hist, fg_color="transparent")
     fila_acc.pack(fill="x", padx=12, pady=(0, 10))
-    btn_secundario(fila_acc, "↺  Recargar",    _recargar_historial, ancho=120, alto=34).pack(side="left", padx=(0, 8))
-    btn_peligro(fila_acc,   "🗑  Eliminar",    _eliminar_venta,      ancho=120, alto=34).pack(side="left")
+    btn_secundario(fila_acc, "↺  Recargar", _recargar_historial, ancho=120, alto=34).pack(side="left", padx=(0, 8))
+    btn_peligro(fila_acc,   "🗑  Eliminar", _eliminar_venta,     ancho=120, alto=34).pack(side="left")
 
     # ══════════════════════════════════════════════════════════════════════════
     # Panel derecho — Nueva Venta
     # ══════════════════════════════════════════════════════════════════════════
-    panel_nueva = ctk.CTkFrame(layout, fg_color="transparent", width=400)
+    panel_nueva = ctk.CTkScrollableFrame(layout, fg_color="transparent", width=400)
     panel_nueva.pack(side="right", fill="y")
-    panel_nueva.pack_propagate(False)
+    
 
-    # ── Datos de la venta 8387rcPNz8SRX6pYXgdxCZg3VMLFwtdJB3Z9LeX8Ge2n─────────
+    # ── Datos de la venta ─────────────────────────────────────────────────────
     form_venta = panel_formulario(panel_nueva, "🧾 Nueva Venta")
 
-    # Clientes
     try:
-        clientes_raw = ClienteDAO().obtener_todos()
-        opciones_cli = [f"{c.id_usuario} — {c.nombre}" for c in clientes_raw]
+        clientes_raw  = ClienteDAO().obtener_todos()
+        opciones_cli  = [f"{c.id_usuario} — {c.nombre}" for c in clientes_raw]
     except Exception:
         opciones_cli = []
 
-    combo_cli = combo_opciones(form_venta, "Cliente:", opciones_cli, ancho=250)
-
-    # Empleado (puede venir de la sesión o seleccionarse)
+    # Cargar empleados + administradores como posibles vendedores.
+    # Los admins no tienen fila en la tabla `empleado`, así que se consulta
+    # `usuario` directamente para obtener su ID y se etiquetan como "Admin".
     try:
         empleados_raw = EmpleadoDAO().obtener_todos()
         opciones_emp  = [f"{e.id_usuario} — {e.nombre}" for e in empleados_raw]
     except Exception:
         opciones_emp = []
 
+    try:
+        from database import DatabaseConnection
+        _conn = DatabaseConnection().obtener_conexion()
+        _cur  = _conn.cursor()
+        _cur.execute("SELECT id_usuario FROM usuario WHERE tipo = 'admin'")
+        for (id_admin,) in _cur.fetchall():
+            opciones_emp.append(f"{id_admin} — {id_admin} (Admin)")
+        _cur.close()
+    except Exception:
+        pass
+
+    combo_cli = combo_opciones(form_venta, "Cliente:",  opciones_cli, ancho=250)
     combo_emp = combo_opciones(form_venta, "Empleado:", opciones_emp, ancho=250)
+
+    # CORRECCIÓN: pre-seleccionar el empleado de sesión si se recibió
+    if id_empleado_sesion and opciones_emp:
+        for opcion in opciones_emp:
+            if str(opcion).startswith(str(id_empleado_sesion) + " —"):
+                combo_emp.set(opcion)
+                break
 
     # ── Agregar productos al carrito ──────────────────────────────────────────
     form_prod = panel_formulario(panel_nueva, "➕ Agregar Producto al Carrito", pady=(8, 8))
 
     try:
-        productos_raw  = _CTRL_PROD.listar()
-        opciones_prod  = [f"{p.id_producto} — {p.nombre}  (${p.precio_venta:,.0f} | Stock:{p.stock})"
-                          for p in productos_raw]
+        productos_raw = _CTRL_PROD.listar()
+        opciones_prod = [
+            f"{p.id_producto} — {p.nombre}  (${p.precio_venta:,.0f} | Stock:{p.stock})"
+            for p in productos_raw
+        ]
     except Exception:
         opciones_prod = []
 
     combo_prod = combo_opciones(form_prod, "Producto:", opciones_prod, ancho=250)
-    entry_cant = campo_numero(form_prod,  "Cantidad:",   "1", ancho=80)
+    entry_cant = campo_numero(form_prod, "Cantidad:", "1", ancho=80)
 
     estado_prod = LabelEstado(form_prod)
 
-    # ── Carrito (lista de ítems) 8387rcPNz8SRX6pYXgdxCZg3VMLFwtdJB3Z9LeX8Ge2n──
+    # ── Carrito ───────────────────────────────────────────────────────────────
     carrito_frame = ctk.CTkFrame(panel_nueva, fg_color="white", corner_radius=12)
     carrito_frame.pack(fill="x", pady=(0, 8))
 
@@ -141,7 +166,7 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
     ctk.CTkFrame(carrito_frame, height=1, fg_color="#e2e8f0").pack(fill="x")
 
     scroll_carrito = ctk.CTkScrollableFrame(carrito_frame, fg_color="transparent",
-                                            height=160)
+                                            height=80)
     scroll_carrito.pack(fill="x", padx=10, pady=5)
 
     lbl_total = ctk.CTkLabel(carrito_frame,
@@ -152,9 +177,8 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
 
     estado_venta = LabelEstado(panel_nueva)
 
-    # ── Estado interno del carrito 8387rcPNz8SRX6pYXgdxCZg3VMLFwtdJB3Z9LeX8Ge2n
-    _carrito: list[dict] = []   # [{id_prod, nombre, cantidad, precio, subtotal}]
-    _filas_widgets: list = []   # widgets de cada fila en scroll_carrito
+    # ── Estado interno del carrito ────────────────────────────────────────────
+    _carrito: list[dict] = []
 
     def _actualizar_total():
         total = sum(item["subtotal"] for item in _carrito)
@@ -163,17 +187,16 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
     def _redibujar_carrito():
         for w in scroll_carrito.winfo_children():
             w.destroy()
-        _filas_widgets.clear()
 
         if not _carrito:
             ctk.CTkLabel(scroll_carrito,
                          text="Sin productos agregados.",
                          font=("Arial", 11), text_color="gray").pack(pady=10)
+            _actualizar_total()
             return
 
         for i, item in enumerate(_carrito):
-            fila = ctk.CTkFrame(scroll_carrito, fg_color="#f8fafc",
-                                corner_radius=6)
+            fila = ctk.CTkFrame(scroll_carrito, fg_color="#f8fafc", corner_radius=6)
             fila.pack(fill="x", pady=2)
 
             ctk.CTkLabel(fila,
@@ -185,7 +208,7 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
                          text=f"x{item['cantidad']}  ·  {formatear_moneda(item['subtotal'])}",
                          font=("Arial", 11), text_color="#64748b").pack(side="left", padx=4)
 
-            idx = i  # captura para el lambda
+            idx = i
             ctk.CTkButton(fila, text="✕", width=28, height=28,
                           fg_color="#fee2e2", text_color="#dc2626",
                           hover_color="#fecaca", font=("Arial", 10, "bold"),
@@ -201,7 +224,7 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
             estado_venta.limpiar()
 
     def _agregar_al_carrito():
-        sel = combo_prod.get()
+        sel      = combo_prod.get()
         cant_str = entry_cant.get().strip()
 
         if not sel:
@@ -215,7 +238,12 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
             estado_prod.mostrar("Cantidad inválida.", "error")
             return
 
-        id_prod = sel.split(" — ")[0].strip()
+        # CORRECCIÓN: convertir id_prod a int para que coincida con la PK en BD
+        id_prod_str = sel.split(" — ")[0].strip()
+        try:
+            id_prod = int(id_prod_str)
+        except ValueError:
+            id_prod = id_prod_str  # ID alfanumérico, mantener como str
 
         try:
             prod = _CTRL_PROD.obtener(id_prod)
@@ -228,7 +256,7 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
                 f"Stock insuficiente. Disponible: {prod.stock}", "error")
             return
 
-        # Si ya está en carrito, actualizar cantidad
+        # Si ya está en el carrito, actualizar cantidad
         for item in _carrito:
             if item["id_prod"] == id_prod:
                 nueva_cant = item["cantidad"] + cant
@@ -236,8 +264,8 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
                     estado_prod.mostrar(
                         f"Stock insuficiente para {nueva_cant} unidades.", "error")
                     return
-                item["cantidad"]  = nueva_cant
-                item["subtotal"]  = round(nueva_cant * item["precio"], 2)
+                item["cantidad"] = nueva_cant
+                item["subtotal"] = round(nueva_cant * item["precio"], 2)
                 _redibujar_carrito()
                 estado_prod.mostrar(f"Cantidad actualizada a {nueva_cant}.", "exito")
                 limpiar_campos(entry_cant)
@@ -245,7 +273,7 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
                 return
 
         _carrito.append({
-            "id_prod":  id_prod,
+            "id_prod":  id_prod,          # int (o str si es alfanumérico)
             "nombre":   prod.nombre,
             "cantidad": cant,
             "precio":   prod.precio_venta,
@@ -272,6 +300,7 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
 
         id_cli = sel_cli.split(" — ")[0].strip()
         id_emp = sel_emp.split(" — ")[0].strip()
+        # CORRECCIÓN: pasar los id_prod ya normalizados desde el carrito
         items  = [(item["id_prod"], item["cantidad"]) for item in _carrito]
         total  = sum(item["subtotal"] for item in _carrito)
 
@@ -288,17 +317,21 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
             _carrito.clear()
             _redibujar_carrito()
             combo_cli.set("")
-            combo_emp.set("")
+            if not id_empleado_sesion:
+                combo_emp.set("")
             estado_venta.mostrar(f"Venta #{id_venta} completada.", "exito")
             _recargar_historial()
         except Exception as e:
+            import traceback
+            traceback.print_exc()   # ← línea nueva
             estado_venta.mostrar(str(e), "error")
 
     def _limpiar_carrito():
         _carrito.clear()
         _redibujar_carrito()
         combo_cli.set("")
-        combo_emp.set("")
+        if not id_empleado_sesion:
+            combo_emp.set("")
         estado_venta.limpiar()
 
     # ── Botón agregar ─────────────────────────────────────────────────────────
@@ -311,7 +344,7 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
 
     btn_exito(fila_final,    "✔  Confirmar Venta", _confirmar_venta, ancho=180, alto=40).pack(
         side="left", padx=(0, 8))
-    btn_secundario(fila_final, "✕  Limpiar",        _limpiar_carrito, ancho=120, alto=40).pack(
+    btn_secundario(fila_final, "✕  Limpiar",       _limpiar_carrito, ancho=120, alto=40).pack(
         side="left")
 
     # ── Carga inicial ─────────────────────────────────────────────────────────
