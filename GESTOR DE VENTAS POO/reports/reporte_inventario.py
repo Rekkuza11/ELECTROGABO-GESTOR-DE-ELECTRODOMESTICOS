@@ -6,38 +6,52 @@ Aplica:
   - Método de clase: punto de entrada al reporte.
   - Métodos estáticos: cálculos puros de dominio (valor de inventario, margen).
   - Excepciones especializadas del dominio.
+
+CORRECCIÓN #11 — SQL dinámico mediante f-string:
+    obtener_todos_los_productos() usaba f"... FROM {self._tabla} ..." para
+    construir la query.  Aunque _tabla es una constante de clase nunca
+    derivada de entrada del usuario, el patrón f-string en cursor.execute()
+    establece un precedente peligroso de SQL dinámico.
+
+    Solución:
+    - Se elimina la interpolación de {self._tabla} en la query.
+    - El nombre de tabla "producto" se hardcodea directamente en el SQL.
+    - _tabla se conserva como atributo de clase para documentar qué tabla
+      gestiona este reporte, pero ya NO se interpola en ningún cursor.execute().
 """
- 
+
 from database import DatabaseConnection
 from exceptions import BaseDatosError
 from models.producto import Producto
 from UTIL.helpers import formatear_moneda, obtener_fecha_actual
- 
- 
+
+
 class ReporteInventario:
     """
     Genera reportes sobre el estado del inventario de productos.
- 
+
     Atributos de clase:
-        _tabla          (protegido) — tabla principal.
+        _tabla          (protegido) — tabla principal (solo documentación).
         STOCK_MINIMO    (protegido) — umbral bajo el cual se emite alerta.
     """
- 
+
+    # Atributo de clase — identifica la tabla que gestiona este reporte.
+    # CORRECCIÓN #11: ya NO se interpola en f-strings de SQL.
     _tabla: str = "producto"
-    STOCK_MINIMO: int = 5  # umbral de alerta configurable a nivel de clase
- 
+    STOCK_MINIMO: int = 5
+
     def __init__(self):
         self._db = DatabaseConnection()
- 
+
     # ── Método de clase (punto de entrada recomendado) ────────────────────────
- 
+
     @classmethod
     def generar(cls) -> "ReporteInventario":
         """Fábrica: crea e imprime el reporte completo de inventario."""
         reporte = cls()
         reporte.mostrar_resumen()
         return reporte
- 
+
     @classmethod
     def configurar_stock_minimo(cls, nuevo_minimo: int) -> None:
         """
@@ -47,21 +61,25 @@ class ReporteInventario:
         if nuevo_minimo < 0:
             raise ValueError("El stock mínimo no puede ser negativo.")
         cls.STOCK_MINIMO = nuevo_minimo
- 
+
     # ── Métodos públicos ──────────────────────────────────────────────────────
- 
+
     def obtener_todos_los_productos(self) -> list:
         """
         Retorna todos los productos con su información completa.
         Cada fila: (id_producto, nombre, marca, precio_compra, precio_venta, stock)
+
+        CORRECCIÓN #11: tabla hardcodeada — sin f-string ni interpolación dinámica.
         """
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
-            cursor.execute(f"""
+            # Tabla hardcodeada: no se usa self._tabla en el SQL para evitar
+            # el patrón de SQL dinámico mediante interpolación de cadenas.
+            cursor.execute("""
                 SELECT id_producto, nombre, marca,
                        precio_compra, precio_venta, stock
-                FROM {self._tabla}
+                FROM producto
                 ORDER BY nombre ASC
             """)
             return cursor.fetchall()
@@ -69,7 +87,7 @@ class ReporteInventario:
             raise BaseDatosError(f"Error al obtener productos: {e}") from e
         finally:
             cursor.close()
- 
+
     def obtener_productos_stock_bajo(self) -> list:
         """
         Retorna productos cuyo stock es menor o igual al STOCK_MINIMO.
@@ -90,7 +108,7 @@ class ReporteInventario:
             raise BaseDatosError(f"Error al obtener productos con stock bajo: {e}") from e
         finally:
             cursor.close()
- 
+
     def obtener_productos_sin_stock(self) -> list:
         """
         Retorna productos con stock igual a cero (agotados).
@@ -110,7 +128,7 @@ class ReporteInventario:
             raise BaseDatosError(f"Error al obtener productos sin stock: {e}") from e
         finally:
             cursor.close()
- 
+
     def obtener_valor_total_inventario(self) -> float:
         """
         Calcula el valor total del inventario a precio de compra
@@ -129,7 +147,7 @@ class ReporteInventario:
             raise BaseDatosError(f"Error al calcular valor del inventario: {e}") from e
         finally:
             cursor.close()
- 
+
     def obtener_valor_potencial_ventas(self) -> float:
         """
         Calcula el ingreso potencial si se vendiera todo el inventario
@@ -148,7 +166,7 @@ class ReporteInventario:
             raise BaseDatosError(f"Error al calcular valor potencial: {e}") from e
         finally:
             cursor.close()
- 
+
     def obtener_total_productos(self) -> int:
         """Retorna el número total de productos distintos en inventario."""
         conexion = self._db.obtener_conexion()
@@ -161,7 +179,7 @@ class ReporteInventario:
             raise BaseDatosError(f"Error al contar productos: {e}") from e
         finally:
             cursor.close()
- 
+
     def obtener_productos_mayor_margen(self, limite: int = 5) -> list:
         """
         Productos con mayor margen de ganancia porcentual.
@@ -189,7 +207,7 @@ class ReporteInventario:
             raise BaseDatosError(f"Error al obtener productos por margen: {e}") from e
         finally:
             cursor.close()
- 
+
     def obtener_productos_como_objetos(self) -> list:
         """
         Retorna la lista de productos como instancias de la clase Producto.
@@ -197,7 +215,7 @@ class ReporteInventario:
         """
         filas = self.obtener_todos_los_productos()
         return [Producto.desde_fila_bd(fila) for fila in filas]
- 
+
     def mostrar_resumen(self) -> None:
         """Imprime en consola un resumen ejecutivo del inventario."""
         total_productos   = self.obtener_total_productos()
@@ -206,7 +224,7 @@ class ReporteInventario:
         ganancia_potencial = self.calcular_ganancia_potencial(valor_inventario, valor_potencial)
         stock_bajo        = self.obtener_productos_stock_bajo()
         sin_stock         = self.obtener_productos_sin_stock()
- 
+
         print("\n" + "═" * 50)
         print("     REPORTE DE INVENTARIO — ElectroGabo")
         print("═" * 50)
@@ -215,7 +233,7 @@ class ReporteInventario:
         print(f"  Valor invertido       : {formatear_moneda(valor_inventario)}")
         print(f"  Potencial de venta    : {formatear_moneda(valor_potencial)}")
         print(f"  Ganancia potencial    : {formatear_moneda(ganancia_potencial)}")
- 
+
         print(f"\n  — Productos con stock bajo (≤ {self.STOCK_MINIMO} uds) —")
         if stock_bajo:
             for id_p, nombre, marca, stock in stock_bajo:
@@ -223,12 +241,12 @@ class ReporteInventario:
                 print(f"  • [{id_p}] {nombre} ({marca}) — {estado}")
         else:
             print("  ✓ Todos los productos tienen stock suficiente.")
- 
+
         if sin_stock:
             print(f"\n  — Productos AGOTADOS ({len(sin_stock)}) —")
             for id_p, nombre, marca in sin_stock:
                 print(f"  ✗ [{id_p}] {nombre} ({marca})")
- 
+
         print("\n  — Top 5 productos con mayor margen —")
         top_margen = self.obtener_productos_mayor_margen(5)
         if top_margen:
@@ -239,11 +257,11 @@ class ReporteInventario:
                       f"Margen: {margen}%")
         else:
             print("  Sin datos aún.")
- 
+
         print("═" * 50 + "\n")
- 
+
     # ── Métodos estáticos ────────────────────────────────────────────────────
- 
+
     @staticmethod
     def calcular_ganancia_potencial(valor_compra: float, valor_venta: float) -> float:
         """
@@ -251,7 +269,7 @@ class ReporteInventario:
         No necesita estado de instancia.
         """
         return round(valor_venta - valor_compra, 2)
- 
+
     @staticmethod
     def evaluar_estado_stock(stock: int, stock_minimo: int) -> str:
         """
@@ -263,7 +281,7 @@ class ReporteInventario:
         if stock <= stock_minimo:
             return "BAJO"
         return "OK"
- 
+
     @staticmethod
     def formatear_fila_consola(id_p, nombre, marca, precio_venta, stock) -> str:
         """Método estático: formatea una fila de producto para consola."""

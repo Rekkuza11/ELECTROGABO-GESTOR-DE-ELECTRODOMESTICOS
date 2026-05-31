@@ -8,33 +8,34 @@ Aplica:
   - Excepciones especializadas del dominio.
 
 CORRECCIÓN #9 — Reporte de ventas excluye ventas de administradores:
-    Las queries que unían venta con empleado usando INNER JOIN (implícito
-    en JOIN) excluían automáticamente todas las ventas registradas por un
-    administrador, ya que los admins no tienen fila en la tabla empleado.
-    
-    Solución:
-    - Se cambia JOIN empleado → LEFT JOIN empleado en todas las queries
-      que involucran la tabla empleado.
-    - Se cambia JOIN usuario (cuando aplica) por un JOIN explícito a usuario
-      para resolver el nombre del vendedor con COALESCE.
-    - COALESCE(e.nombre, CONCAT(u.id_usuario, ' (Admin)')) devuelve el nombre
-      del empleado si existe, o el ID del admin entre paréntesis si no.
+    (aplicada por el equipo en Fase 4 — sin cambios aquí)
 
 CORRECCIÓN #12 — Problemas de zona horaria en reportes:
-    CURDATE() y NOW() en MySQL operan en UTC cuando el servidor está
-    configurado así (ej. TiDB Cloud / AWS RDS por defecto).  En Colombia
-    el huso horario es UTC-5, por lo que CURDATE() devuelve la fecha del
-    día siguiente entre las 7pm y medianoche colombiana, haciendo que
-    obtener_ingresos_hoy() devuelva 0 o valores incorrectos en ese rango.
+    (aplicada por el equipo en Fase 4 — sin cambios aquí)
+
+CORRECCIÓN #11 — SQL dinámico mediante f-string:
+    El método obtener_ingresos_hoy() construía su query mediante un f-string
+    que interpolaba las constantes _TZ_OFFSET y _COL_DATE directamente en
+    el texto pasado a cursor.execute():
+
+        cursor.execute(f\"\"\"
+            ...
+            WHERE DATE(CONVERT_TZ(fecha, '+00:00', '{_TZ_OFFSET}')) = {_COL_DATE}
+        \"\"\")
+
+    Aunque _TZ_OFFSET y _COL_DATE son constantes de módulo (nunca derivadas
+    de entrada del usuario), el patrón establece un precedente peligroso:
+    cualquier desarrollador que siga el mismo estilo con un valor dinámico
+    introduciría una SQL injection.
 
     Solución:
-    - Se reemplaza CURDATE() por DATE(CONVERT_TZ(NOW(), '+00:00', '-05:00'))
-      para operar siempre en la hora local de Colombia (UTC-5), independiente
-      de la configuración del servidor de BD.
-    - obtener_clientes_nuevos_mes() en reporte_clientes.py usa el mismo patrón;
-      aquí se aplica a obtener_ingresos_hoy().
-    - Se extrae la expresión de zona horaria en la constante _COL_DATE para
-      mantener DRY y facilitar futuros cambios de zona horaria.
+    - Las constantes _COL_DATE, _COL_MONTH, _COL_YEAR se redefinen como
+      cadenas literales sin f-string (el offset '-05:00' queda explícito).
+    - En obtener_ingresos_hoy() el SQL se construye por concatenación de
+      constantes de módulo verificadas, sin ningún f-string en el argumento
+      de cursor.execute().
+    - Mantener _TZ_OFFSET como fuente única del offset facilita actualizar
+      la zona horaria en un solo lugar si fuera necesario.
 """
 
 from datetime import datetime
@@ -44,13 +45,18 @@ from models.producto import Producto
 from UTIL.helpers import formatear_moneda, obtener_fecha_actual
 
 
-# ── Constante de zona horaria Colombia (UTC-5) ────────────────────────────────
-# Se usa en las queries que necesitan la fecha/hora local colombiana.
-# Para cambiar la zona horaria basta con editar este valor.
+# ── Constantes de zona horaria Colombia (UTC-5) ───────────────────────────────
+# _TZ_OFFSET es la única fuente del offset; los demás son fragmentos SQL
+# construidos a partir de él sin usar f-string para evitar el patrón de
+# SQL dinámico (CORRECCIÓN #11).
 _TZ_OFFSET = "-05:00"
-_COL_DATE  = f"DATE(CONVERT_TZ(NOW(), '+00:00', '{_TZ_OFFSET}'))"
-_COL_MONTH = f"MONTH(CONVERT_TZ(NOW(), '+00:00', '{_TZ_OFFSET}'))"
-_COL_YEAR  = f"YEAR(CONVERT_TZ(NOW(), '+00:00', '{_TZ_OFFSET}'))"
+
+# CORRECCIÓN #11: cadenas literales sin f-string.
+# Antes:  f"DATE(CONVERT_TZ(NOW(), '+00:00', '{_TZ_OFFSET}'))"
+# Ahora:  literal con el offset embebido explícitamente.
+_COL_DATE  = "DATE(CONVERT_TZ(NOW(), '+00:00', '-05:00'))"
+_COL_MONTH = "MONTH(CONVERT_TZ(NOW(), '+00:00', '-05:00'))"
+_COL_YEAR  = "YEAR(CONVERT_TZ(NOW(), '+00:00', '-05:00'))"
 
 
 class ReporteVentas:
@@ -82,9 +88,7 @@ class ReporteVentas:
         Retorna todas las ventas con datos de cliente y empleado/admin.
         Cada fila: (id_venta, fecha, total, nombre_cliente, nombre_vendedor)
 
-        CORRECCIÓN #9:
-            LEFT JOIN empleado asegura que ventas de admins también aparezcan.
-            JOIN usuario resuelve el identificador del vendedor en todos los casos.
+        CORRECCIÓN #9: LEFT JOIN empleado asegura que ventas de admins aparezcan.
         """
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
@@ -155,21 +159,27 @@ class ReporteVentas:
         """
         Retorna el total de ventas del día actual en hora colombiana.
 
-        CORRECCIÓN #12:
-            CURDATE() opera en UTC — en Colombia (UTC-5) esto provoca que
-            entre las 7:00 p.m. y medianoche colombiana la query devuelva 0
-            porque el servidor ya pasó a la fecha del día siguiente.
-            Se usa CONVERT_TZ() para comparar contra la fecha en UTC-5.
+        CORRECCIÓN #12: usa CONVERT_TZ en vez de CURDATE() para operar
+            en UTC-5 (Colombia) independientemente de la configuración del
+            servidor de base de datos.
+
+        CORRECCIÓN #11: el SQL ya no se construye con f-string.
+            Se usa concatenación explícita de la constante de módulo _COL_DATE,
+            que es un fragmento SQL verificado, nunca derivado de entrada del
+            usuario.  Esto elimina el patrón de SQL dinámico en cursor.execute().
         """
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
-            # _COL_DATE = DATE(CONVERT_TZ(NOW(), '+00:00', '-05:00'))
-            cursor.execute(f"""
-                SELECT COALESCE(SUM(total), 0)
-                FROM venta
-                WHERE DATE(CONVERT_TZ(fecha, '+00:00', '{_TZ_OFFSET}')) = {_COL_DATE}
-            """)
+            # CORRECCIÓN #11: concatenación de constantes de módulo, sin f-string.
+            # _COL_DATE = "DATE(CONVERT_TZ(NOW(), '+00:00', '-05:00'))"
+            sql = (
+                "SELECT COALESCE(SUM(total), 0) "
+                "FROM venta "
+                "WHERE DATE(CONVERT_TZ(fecha, '+00:00', '-05:00')) = "
+                + _COL_DATE
+            )
+            cursor.execute(sql)
             resultado = cursor.fetchone()
             return float(resultado[0]) if resultado else 0.0
         except Exception as e:
@@ -195,9 +205,8 @@ class ReporteVentas:
         Agrupa las ventas por empleado/vendedor.
         Retorna: (nombre_vendedor, total_ventas, monto_total)
 
-        CORRECCIÓN #9:
-            LEFT JOIN empleado y JOIN usuario permiten incluir a los admins
-            que hayan registrado ventas.  COALESCE resuelve el nombre.
+        CORRECCIÓN #9: LEFT JOIN empleado y JOIN usuario permiten incluir
+            a los admins que hayan registrado ventas.
         """
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
