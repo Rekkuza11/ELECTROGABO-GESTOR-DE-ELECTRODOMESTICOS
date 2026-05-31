@@ -2,6 +2,13 @@
 Controller: Producto.
 Responsabilidad: mediar entre la vista de gestión de productos y el ProductoDAO.
 Aplica SRP — sólo orquesta operaciones CRUD sobre productos.
+
+CORRECCIONES — Fase 3:
+  - #4: _validar_id() ya no convierte el ID a int.
+        La BD define id_producto como varchar(20), por lo que IDs como
+        'PD66322' son válidos.  Forzar int() rechazaba estos valores
+        y causaba ValidacionError al editar o registrar productos reales.
+        El método ahora devuelve str (compatible con varchar(20) en BD).
 """
 
 from dao.producto_dao import ProductoDAO
@@ -51,7 +58,7 @@ class ProductoController:
         Valida y registra un nuevo producto con ID manual obligatorio.
         Lanza ValidacionError si algún campo es inválido.
         """
-        id_p = self._validar_id(id_producto)
+        id_p = self._validar_id(id_producto)   # str, compatible con varchar(20)
         self._validar_texto(nombre, "Nombre")
         self._validar_texto(marca, "Marca")
         pc = self._validar_precio(precio_compra, "Precio Compra")
@@ -85,18 +92,20 @@ class ProductoController:
     # ── Validaciones privadas ─────────────────────────────────────────────────
 
     @staticmethod
-    def _validar_id(valor: str):
-        """ID numérico entero positivo, obligatorio."""
+    def _validar_id(valor: str) -> str:
+        """
+        CORRECCIÓN #4 — id_producto es varchar(20) en la BD, no int.
+
+        La versión anterior hacía int(val), lo que rechazaba IDs alfanuméricos
+        como 'PD66322' con ValidacionError.  Ahora se acepta cualquier cadena
+        no vacía de hasta 20 caracteres, que es lo que el motor espera.
+        """
         val = str(valor).strip()
         if not val:
             raise ValidacionError("ID Producto", "no puede estar vacío")
-        try:
-            id_p = int(val)
-        except ValueError:
-            raise ValidacionError("ID Producto", "debe ser un número entero")
-        if id_p <= 0:
-            raise ValidacionError("ID Producto", "debe ser mayor que cero")
-        return id_p
+        if len(val) > 20:
+            raise ValidacionError("ID Producto", "máximo 20 caracteres (varchar en BD)")
+        return val  # str — compatible con la columna varchar(20)
 
     @staticmethod
     def _validar_texto(valor: str, campo: str) -> str:
