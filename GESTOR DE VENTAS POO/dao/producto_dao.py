@@ -6,12 +6,20 @@ Aplica:
   - Método de clase: fábrica de Producto desde fila de BD.
   - Excepciones especializadas: ProductoNoEncontradoError, IntegridadDatosError.
   - Principio DIP: depende de la abstracción (DatabaseConnection), no de mysql directo.
+
+CORRECCIONES — Fase 1:
+  - #7:  actualizar_stock() añade cláusula AND stock >= %s para que el motor
+         rechace el UPDATE si no hay unidades suficientes, imposibilitando que
+         el stock quede negativo por concurrencia o doble llamada.
+  - #19: nuevo método aumentar_stock() para reponer unidades; se usa al revertir
+         una venta eliminada (fix #18 en venta_controller.py).
 """
 
 from database import DatabaseConnection
 from models.producto import Producto
 from exceptions import (
     ProductoNoEncontradoError,
+    StockInsuficienteError,       # ← nuevo import (necesario para #7)
     IntegridadDatosError,
     BaseDatosError,
 )
@@ -25,6 +33,8 @@ class ProductoDAO:
     def __init__(self):
         self._db = DatabaseConnection()
 
+    # ── CRUD estándar ─────────────────────────────────────────────────────────
+
     def insertar(self, producto: Producto) -> None:
         if producto.id_producto is None:
             raise BaseDatosError(
@@ -34,7 +44,8 @@ class ProductoDAO:
         cursor = conexion.cursor()
         try:
             sql = """
-                INSERT INTO producto (id_producto, nombre, marca, precio_compra, precio_venta, stock)
+                INSERT INTO producto
+                    (id_producto, nombre, marca, precio_compra, precio_venta, stock)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """
             cursor.execute(sql, (producto.id_producto,) + self.__a_valores(producto))
@@ -123,13 +134,75 @@ class ProductoDAO:
         finally:
             cursor.close()
 
+    # ── Gestión de stock ──────────────────────────────────────────────────────
+
     def actualizar_stock(self, id_producto, cantidad: int) -> None:
+        """
+        Descuenta `cantidad` unidades del stock del producto.
+
+        CORRECCIÓN #7 — Prevención de stock negativo:
+            El UPDATE incluye la cláusula 'AND stock >= %s', de modo que el
+            motor de base de datos rechaza la operación si las unidades
+            disponibles son insuficientes.  Si rowcount == 0 se distingue
+            entre 'producto inexistente' y 'stock insuficiente' haciendo un
+            SELECT adicional dentro del mismo bloque, antes del rollback.
+
+        Este método sigue disponible para uso independiente; el controlador
+        de ventas lo reemplaza por un UPDATE inline dentro de su transacción
+        atómica (ver venta_controller.py).
+        """
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
             cursor.execute(
-                "UPDATE producto SET stock = stock - %s WHERE id_producto = %s",
-                (cantidad, id_producto)
+                "UPDATE producto "
+                "SET stock = stock - %s "
+                "WHERE id_producto = %s AND stock >= %s",
+                (cantidad, id_producto, cantidad),
+            )
+            if cursor.rowcount == 0:
+                # Determinar la causa exacta antes de lanzar la excepción
+                cursor.execute(
+                    "SELECT nombre, stock FROM producto WHERE id_producto = %s",
+                    (id_producto,),
+                )
+                fila = cursor.fetchone()
+                if not fila:
+                    raise ProductoNoEncontradoError(id_producto)
+                raise StockInsuficienteError(fila[0], int(fila[1]), cantidad)
+
+            conexion.commit()
+
+        except (ProductoNoEncontradoError, StockInsuficienteError):
+            raise
+        except Exception as e:
+            conexion.rollback()
+            self.__manejar_error(e, f"actualizar stock {id_producto}")
+        finally:
+            cursor.close()
+
+    def aumentar_stock(self, id_producto, cantidad: int) -> None:
+        """
+        CORRECCIÓN #19 — Método para reponer stock.
+            Incrementa en `cantidad` las unidades disponibles del producto.
+            Usado principalmente desde venta_controller.eliminar() para
+            revertir el stock al cancelar una venta (fix #18).
+
+        Lanza:
+            BaseDatosError            — si `cantidad` no es positiva.
+            ProductoNoEncontradoError — si el producto no existe en BD.
+        """
+        if cantidad <= 0:
+            raise BaseDatosError(
+                f"Error en 'aumentar stock': la cantidad debe ser positiva "
+                f"(recibido: {cantidad})."
+            )
+        conexion = self._db.obtener_conexion()
+        cursor = conexion.cursor()
+        try:
+            cursor.execute(
+                "UPDATE producto SET stock = stock + %s WHERE id_producto = %s",
+                (cantidad, id_producto),
             )
             if cursor.rowcount == 0:
                 raise ProductoNoEncontradoError(id_producto)
@@ -138,9 +211,11 @@ class ProductoDAO:
             raise
         except Exception as e:
             conexion.rollback()
-            self.__manejar_error(e, f"actualizar stock {id_producto}")
+            self.__manejar_error(e, f"aumentar stock {id_producto}")
         finally:
             cursor.close()
+
+    # ── Helpers privados ──────────────────────────────────────────────────────
 
     @staticmethod
     def __a_valores(producto: Producto) -> tuple:
