@@ -13,13 +13,28 @@ CORRECCIONES — Fase 1:
          el stock quede negativo por concurrencia o doble llamada.
   - #19: nuevo método aumentar_stock() para reponer unidades; se usa al revertir
          una venta eliminada (fix #18 en venta_controller.py).
+
+CORRECCIÓN #11 — SQL dinámico mediante f-string:
+    Los métodos obtener_todos(), obtener_por_id() y eliminar() usaban
+    f"... FROM {self._tabla} ..." para construir las queries.
+    Aunque _tabla es una constante de clase nunca derivada de entrada del
+    usuario, el patrón f-string en cursor.execute() es una mala práctica:
+    establece un precedente peligroso que, si alguien llega a alimentar
+    _tabla con datos externos, derivaría en SQL injection.
+
+    Solución:
+    - Se elimina la interpolación de {self._tabla} en todas las queries.
+    - El nombre de tabla "producto" se hardcodea directamente en cada SQL.
+    - _tabla se conserva como atributo de clase para documentar qué tabla
+      gestiona este DAO, pero ya NO se usa en ningún cursor.execute().
+    - Toda la parametrización de valores de usuario sigue usando %s.
 """
 
 from database import DatabaseConnection
 from models.producto import Producto
 from exceptions import (
     ProductoNoEncontradoError,
-    StockInsuficienteError,       # ← nuevo import (necesario para #7)
+    StockInsuficienteError,
     IntegridadDatosError,
     BaseDatosError,
 )
@@ -28,6 +43,10 @@ from exceptions import (
 class ProductoDAO:
     """Objeto de acceso a datos para la entidad Producto."""
 
+    # Atributo de clase — identifica la tabla que gestiona este DAO.
+    # CORRECCIÓN #11: ya NO se interpola en f-strings de SQL; el nombre
+    # de tabla se escribe literalmente en cada query para evitar el
+    # patrón de SQL dinámico.
     _tabla: str = "producto"
 
     def __init__(self):
@@ -60,7 +79,8 @@ class ProductoDAO:
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
-            cursor.execute(f"SELECT * FROM {self._tabla}")
+            # CORRECCIÓN #11: tabla hardcodeada — sin f-string ni interpolación dinámica.
+            cursor.execute("SELECT * FROM producto")
             filas = cursor.fetchall()
             productos = []
             for fila in filas:
@@ -78,8 +98,9 @@ class ProductoDAO:
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
+            # CORRECCIÓN #11: tabla hardcodeada; id_producto sigue siendo %s.
             cursor.execute(
-                f"SELECT * FROM {self._tabla} WHERE id_producto = %s",
+                "SELECT * FROM producto WHERE id_producto = %s",
                 (id_producto,)
             )
             fila = cursor.fetchone()
@@ -119,8 +140,9 @@ class ProductoDAO:
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
+            # CORRECCIÓN #11: tabla hardcodeada; id_producto sigue siendo %s.
             cursor.execute(
-                f"DELETE FROM {self._tabla} WHERE id_producto=%s",
+                "DELETE FROM producto WHERE id_producto = %s",
                 (id_producto,)
             )
             if cursor.rowcount == 0:
@@ -146,10 +168,6 @@ class ProductoDAO:
             disponibles son insuficientes.  Si rowcount == 0 se distingue
             entre 'producto inexistente' y 'stock insuficiente' haciendo un
             SELECT adicional dentro del mismo bloque, antes del rollback.
-
-        Este método sigue disponible para uso independiente; el controlador
-        de ventas lo reemplaza por un UPDATE inline dentro de su transacción
-        atómica (ver venta_controller.py).
         """
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
@@ -161,7 +179,6 @@ class ProductoDAO:
                 (cantidad, id_producto, cantidad),
             )
             if cursor.rowcount == 0:
-                # Determinar la causa exacta antes de lanzar la excepción
                 cursor.execute(
                     "SELECT nombre, stock FROM producto WHERE id_producto = %s",
                     (id_producto,),

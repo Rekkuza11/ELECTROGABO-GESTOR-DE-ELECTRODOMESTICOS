@@ -9,6 +9,14 @@ CORRECCIONES:
 - _confirmar_venta: validación explícita de campos antes de llamar registrar().
 - combo_emp pre-seleccionado con el empleado de sesión si se recibe id_empleado_sesion.
 - Manejo de excepción más granular para mostrar mensajes útiles al usuario.
+
+CORRECCIÓN #10 — Uso de traceback en producción:
+    Se eliminan `import traceback` y `traceback.print_exc()` del bloque
+    except de _confirmar_venta().  Exponer el stack trace completo en
+    producción filtra rutas internas, nombres de módulos y lógica del
+    sistema, lo que representa un riesgo de seguridad real.
+    El mensaje de error ya se muestra al usuario a través de
+    estado_venta.mostrar(str(e), "error"), que es suficiente.
 """
 
 import customtkinter as ctk
@@ -98,7 +106,6 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
     # ══════════════════════════════════════════════════════════════════════════
     panel_nueva = ctk.CTkScrollableFrame(layout, fg_color="transparent", width=400)
     panel_nueva.pack(side="right", fill="y")
-    
 
     # ── Datos de la venta ─────────────────────────────────────────────────────
     form_venta = panel_formulario(panel_nueva, "🧾 Nueva Venta")
@@ -109,9 +116,6 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
     except Exception:
         opciones_cli = []
 
-    # Cargar empleados + administradores como posibles vendedores.
-    # Los admins no tienen fila en la tabla `empleado`, así que se consulta
-    # `usuario` directamente para obtener su ID y se etiquetan como "Admin".
     try:
         empleados_raw = EmpleadoDAO().obtener_todos()
         opciones_emp  = [f"{e.id_usuario} — {e.nombre}" for e in empleados_raw]
@@ -132,7 +136,6 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
     combo_cli = combo_opciones(form_venta, "Cliente:",  opciones_cli, ancho=250)
     combo_emp = combo_opciones(form_venta, "Empleado:", opciones_emp, ancho=250)
 
-    # CORRECCIÓN: pre-seleccionar el empleado de sesión si se recibió
     if id_empleado_sesion and opciones_emp:
         for opcion in opciones_emp:
             if str(opcion).startswith(str(id_empleado_sesion) + " —"):
@@ -238,12 +241,11 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
             estado_prod.mostrar("Cantidad inválida.", "error")
             return
 
-        # CORRECCIÓN: convertir id_prod a int para que coincida con la PK en BD
         id_prod_str = sel.split(" — ")[0].strip()
         try:
             id_prod = int(id_prod_str)
         except ValueError:
-            id_prod = id_prod_str  # ID alfanumérico, mantener como str
+            id_prod = id_prod_str
 
         try:
             prod = _CTRL_PROD.obtener(id_prod)
@@ -256,7 +258,6 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
                 f"Stock insuficiente. Disponible: {prod.stock}", "error")
             return
 
-        # Si ya está en el carrito, actualizar cantidad
         for item in _carrito:
             if item["id_prod"] == id_prod:
                 nueva_cant = item["cantidad"] + cant
@@ -273,7 +274,7 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
                 return
 
         _carrito.append({
-            "id_prod":  id_prod,          # int (o str si es alfanumérico)
+            "id_prod":  id_prod,
             "nombre":   prod.nombre,
             "cantidad": cant,
             "precio":   prod.precio_venta,
@@ -300,7 +301,6 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
 
         id_cli = sel_cli.split(" — ")[0].strip()
         id_emp = sel_emp.split(" — ")[0].strip()
-        # CORRECCIÓN: pasar los id_prod ya normalizados desde el carrito
         items  = [(item["id_prod"], item["cantidad"]) for item in _carrito]
         total  = sum(item["subtotal"] for item in _carrito)
 
@@ -322,8 +322,9 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
             estado_venta.mostrar(f"Venta #{id_venta} completada.", "exito")
             _recargar_historial()
         except Exception as e:
-            import traceback
-            traceback.print_exc()   # ← línea nueva
+            # CORRECCIÓN #10: eliminados import traceback y traceback.print_exc().
+            # Exponer el stack trace en producción filtra información interna
+            # del sistema. El mensaje de excepción es suficiente para el usuario.
             estado_venta.mostrar(str(e), "error")
 
     def _limpiar_carrito():
