@@ -2,35 +2,36 @@
 Vista: Reporte de Ventas.
 Responsabilidad: mostrar en la interfaz gráfica los datos de ventas
 generados por la capa reports/reporte_ventas.py.
-Aplica el mismo estilo visual que admin_dasboard.py (customtkinter).
+
+Fase 6 · Corrección #20:
+  - Se elimina la función local _crear_tabla() duplicada.
+    Ahora se usa crear_tabla() de interface.components.tablas.
 """
- 
+
 import customtkinter as ctk
-from tkinter import ttk
 from reports.reporte_ventas import ReporteVentas
+from interface.components.tablas import crear_tabla
 from UTIL.helpers import formatear_moneda, obtener_fecha_actual
- 
- 
+
+
 def abrir_reporte_ventas(parent: ctk.CTkFrame) -> None:
     """
     Limpia el frame padre y renderiza el reporte de ventas completo.
-    Recibe el frame de contenido del dashboard para dibujar dentro de él.
     """
-    # Limpiar contenido anterior
     for widget in parent.winfo_children():
         widget.destroy()
- 
+
     reporte = ReporteVentas()
- 
+
     # ── Cabecera ──────────────────────────────────────────────────────────────
     ctk.CTkLabel(parent, text="📊 Reporte de Ventas",
                  font=("Arial", 26, "bold"),
                  text_color="#1e293b").pack(anchor="w", padx=30, pady=(30, 5))
- 
+
     ctk.CTkLabel(parent, text=f"Generado el {obtener_fecha_actual()}",
                  font=("Arial", 13),
                  text_color="gray").pack(anchor="w", padx=30, pady=(0, 20))
- 
+
     # ── Tarjetas de resumen ───────────────────────────────────────────────────
     try:
         total_ventas     = reporte.obtener_cantidad_ventas()
@@ -39,10 +40,10 @@ def abrir_reporte_ventas(parent: ctk.CTkFrame) -> None:
         promedio         = reporte.obtener_venta_promedio()
     except Exception:
         total_ventas = ingresos_totales = ingresos_hoy = promedio = 0.0
- 
+
     fila_cards = ctk.CTkFrame(parent, fg_color="transparent")
     fila_cards.pack(fill="x", padx=30, pady=(0, 15))
- 
+
     _tarjeta(fila_cards, "↗", "#22c55e",
              formatear_moneda(ingresos_hoy), "Ingresos Hoy", "Del día actual")
     _tarjeta(fila_cards, "$", "#2563eb",
@@ -51,22 +52,22 @@ def abrir_reporte_ventas(parent: ctk.CTkFrame) -> None:
              str(total_ventas), "Total Ventas", "Transacciones registradas")
     _tarjeta(fila_cards, "~", "#a855f7",
              formatear_moneda(promedio), "Ticket Promedio", "Por transacción")
- 
-    # ── Área scrollable para tablas ───────────────────────────────────────────
+
+    # ── Área scrollable ───────────────────────────────────────────────────────
     scroll = ctk.CTkScrollableFrame(parent, fg_color="#f1f5f9")
     scroll.pack(fill="both", expand=True, padx=30, pady=(0, 20))
- 
+
     # ── Tabla: top productos ──────────────────────────────────────────────────
     _seccion_titulo(scroll, "🏆 Top 5 Productos Más Vendidos")
- 
+
     try:
         top_productos = reporte.obtener_top_productos_vendidos(5)
     except Exception:
         top_productos = []
- 
+
     cols_prod = ("Producto", "Marca", "Unidades Vendidas", "Ingresos Generados")
-    tabla_prod = _crear_tabla(scroll, cols_prod)
- 
+    tabla_prod = crear_tabla(scroll, cols_prod, altura=6, expandir=False)
+
     if top_productos:
         for producto, marca, unidades, ingresos in top_productos:
             tabla_prod.insert("", "end", values=(
@@ -74,18 +75,18 @@ def abrir_reporte_ventas(parent: ctk.CTkFrame) -> None:
             ))
     else:
         tabla_prod.insert("", "end", values=("Sin datos", "-", "-", "-"))
- 
+
     # ── Tabla: ventas por empleado ────────────────────────────────────────────
     _seccion_titulo(scroll, "👤 Ventas por Empleado")
- 
+
     try:
         por_empleado = reporte.obtener_ventas_por_empleado()
     except Exception:
         por_empleado = []
- 
+
     cols_emp = ("Empleado", "Total Ventas", "Monto Total")
-    tabla_emp = _crear_tabla(scroll, cols_emp)
- 
+    tabla_emp = crear_tabla(scroll, cols_emp, altura=6, expandir=False)
+
     if por_empleado:
         for empleado, total_v, monto in por_empleado:
             tabla_emp.insert("", "end", values=(
@@ -93,86 +94,43 @@ def abrir_reporte_ventas(parent: ctk.CTkFrame) -> None:
             ))
     else:
         tabla_emp.insert("", "end", values=("Sin datos", "-", "-"))
- 
-    # ── Tabla: historial completo de ventas ───────────────────────────────────
+
+    # ── Tabla: historial completo ─────────────────────────────────────────────
     _seccion_titulo(scroll, "📋 Historial Completo de Ventas")
- 
+
     try:
         ventas = reporte.obtener_ventas_completas()
     except Exception:
         ventas = []
- 
+
     cols_ven = ("ID", "Fecha", "Total", "Cliente", "Empleado")
-    tabla_ven = _crear_tabla(scroll, cols_ven)
- 
+    tabla_ven = crear_tabla(scroll, cols_ven, altura=6, expandir=False)
+
     if ventas:
         for id_v, fecha, total, cliente, empleado in ventas:
             tabla_ven.insert("", "end", values=(
                 id_v, str(fecha), formatear_moneda(float(total)), cliente, empleado
             ))
     else:
-        tabla_ven.insert("", "end", values=("Sin ventas registradas", "-", "-", "-", "-"))
- 
- 
+        tabla_ven.insert("", "end",
+                         values=("Sin ventas registradas", "-", "-", "-", "-"))
+
+
 # ── Helpers internos ──────────────────────────────────────────────────────────
- 
-def _tarjeta(parent, icono: str, color: str,
-             valor: str, titulo: str, subtitulo: str) -> None:
-    """Crea una tarjeta de resumen con el mismo estilo del dashboard."""
+
+def _tarjeta(parent, icono, color, valor, titulo, subtitulo) -> None:
     card = ctk.CTkFrame(parent, fg_color="white", corner_radius=12, height=160)
     card.pack(side="left", expand=True, fill="both", padx=(0, 10))
     card.pack_propagate(False)
- 
     ctk.CTkLabel(card, text=icono, font=("Arial", 20, "bold"),
                  fg_color=color, text_color="white",
                  width=45, height=45, corner_radius=10).pack(anchor="w", padx=20, pady=(20, 10))
-    ctk.CTkLabel(card, text=valor, font=("Arial", 20, "bold"),
-                 text_color="#1e293b").pack(anchor="w", padx=20)
-    ctk.CTkLabel(card, text=titulo, font=("Arial", 13, "bold"),
-                 text_color="#1e293b").pack(anchor="w", padx=20)
-    ctk.CTkLabel(card, text=subtitulo, font=("Arial", 11),
-                 text_color="gray").pack(anchor="w", padx=20, pady=(0, 20))
- 
- 
+    ctk.CTkLabel(card, text=valor,    font=("Arial", 20, "bold"), text_color="#1e293b").pack(anchor="w", padx=20)
+    ctk.CTkLabel(card, text=titulo,   font=("Arial", 13, "bold"), text_color="#1e293b").pack(anchor="w", padx=20)
+    ctk.CTkLabel(card, text=subtitulo, font=("Arial", 11), text_color="gray").pack(anchor="w", padx=20, pady=(0, 20))
+
+
 def _seccion_titulo(parent, texto: str) -> None:
-    """Título de sección con separador."""
-    ctk.CTkLabel(parent, text=texto,
-                 font=("Arial", 15, "bold"),
+    ctk.CTkLabel(parent, text=texto, font=("Arial", 15, "bold"),
                  text_color="#1e293b").pack(anchor="w", pady=(20, 6))
     ctk.CTkFrame(parent, height=1, fg_color="#e2e8f0").pack(fill="x", pady=(0, 8))
- 
- 
-def _crear_tabla(parent, columnas: tuple) -> ttk.Treeview:
-    """Crea y empaqueta un Treeview estilizado coherente con el resto del proyecto."""
-    estilo = ttk.Style()
-    estilo.theme_use("default")
-    estilo.configure("ElectroGabo.Treeview",
-                     background="white",
-                     foreground="#1e293b",
-                     rowheight=30,
-                     fieldbackground="white",
-                     font=("Arial", 11))
-    estilo.configure("ElectroGabo.Treeview.Heading",
-                     background="#f1f5f9",
-                     foreground="#64748b",
-                     font=("Arial", 11, "bold"))
-    estilo.map("ElectroGabo.Treeview",
-               background=[("selected", "#dbeafe")])
- 
-    frame = ctk.CTkFrame(parent, fg_color="white", corner_radius=10)
-    frame.pack(fill="x", pady=(0, 10))
- 
-    tabla = ttk.Treeview(frame, columns=columnas, show="headings",
-                         style="ElectroGabo.Treeview", height=6)
- 
-    for col in columnas:
-        tabla.heading(col, text=col)
-        tabla.column(col, anchor="center", width=140)
- 
-    scroll_y = ttk.Scrollbar(frame, orient="vertical", command=tabla.yview)
-    tabla.configure(yscrollcommand=scroll_y.set)
- 
-    tabla.pack(side="left", fill="both", expand=True, padx=10, pady=10)
-    scroll_y.pack(side="right", fill="y", pady=10)
- 
-    return tabla

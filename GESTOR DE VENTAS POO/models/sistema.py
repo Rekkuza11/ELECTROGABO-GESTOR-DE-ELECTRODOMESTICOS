@@ -1,11 +1,26 @@
 """
-Modelo Sistema — Singleton.
-Responsabilidad única: gestionar el ciclo de sesión (login/logout).
-Aplica:
-  - Patrón Singleton.
-  - Encapsulamiento: __usuarios y __usuario_actual privados.
-  - Excepciones especializadas de autenticación.
+LEGACY / DESCONECTADO — models/sistema.py
+Fase 6 · Corrección #16.
+
+Esta clase gestiona la sesión EN MEMORIA mediante un Singleton.
+El flujo real del sistema usa AuthController + DatabaseConnection
+para autenticar contra la base de datos.
+
+Este módulo NO es invocado por ningún controller, DAO ni vista activa.
+Se conserva como referencia de diseño OOP pero NO debe usarse en producción.
+
+Autenticación real:
+    from interface.controllers.auth_controller import AuthController
+    AuthController().login(usuario, password)
 """
+
+import warnings
+warnings.warn(
+    "models.sistema está desconectado del flujo real. "
+    "Usa interface.controllers.auth_controller.AuthController para autenticación.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 import threading
 from exceptions import CredencialesInvalidasError, SesionInactivaError
@@ -13,21 +28,12 @@ from exceptions import CredencialesInvalidasError, SesionInactivaError
 
 class Sistema:
     """
-    Núcleo del sistema de autenticación. Singleton.
-
-    Atributos de clase:
-        _instancia (privado)
-        _lock      (privado)
-
-    Atributos de instancia:
-        __usuarios        (privado) — diccionario id → usuario.
-        __usuario_actual  (privado) — usuario autenticado actualmente.
+    [LEGACY] Núcleo de autenticación en memoria. Singleton.
+    Ver advertencia del módulo — no usar en código nuevo.
     """
 
     _instancia: "Sistema | None" = None
     _lock: threading.Lock = threading.Lock()
-
-    # ── Singleton ─────────────────────────────────────────────────────────────
 
     def __new__(cls) -> "Sistema":
         if cls._instancia is None:
@@ -39,16 +45,11 @@ class Sistema:
                     cls._instancia = obj
         return cls._instancia
 
-    # ── Métodos de clase ──────────────────────────────────────────────────────
-
     @classmethod
     def instancia(cls) -> "Sistema":
         return cls()
 
-    # ── Métodos públicos ──────────────────────────────────────────────────────
-
     def agregar_usuario(self, usuario) -> None:
-        """Registra un usuario en el sistema (admin operation)."""
         self.__usuarios[usuario.id_usuario] = usuario
 
     def mostrar_usuarios(self) -> None:
@@ -56,11 +57,6 @@ class Sistema:
             usuario.mostrar()
 
     def login(self, id_usuario, password) -> bool:
-        """
-        Intenta autenticar al usuario.
-        Lanza CredencialesInvalidasError si las credenciales son incorrectas.
-        Retorna True si el login fue exitoso.
-        """
         usuario = self.__usuarios.get(id_usuario)
         if usuario and usuario.password == password:
             self.__usuario_actual = usuario
@@ -77,14 +73,10 @@ class Sistema:
         return self.__usuario_actual
 
     def requerir_sesion(self):
-        """
-        Verifica que haya una sesión activa.
-        Lanza SesionInactivaError si no hay usuario autenticado.
-        """
         if self.__usuario_actual is None:
             raise SesionInactivaError()
         return self.__usuario_actual
 
     def __repr__(self) -> str:
         u = self.__usuario_actual
-        return f"<Sistema usuarios={len(self.__usuarios)} sesion={u.id_usuario if u else None}>"
+        return f"<Sistema [LEGACY] sesion={u.id_usuario if u else None}>"
