@@ -3,9 +3,13 @@ DAO Usuario.
 Aplica:
   - Singleton DatabaseConnection.
   - Encapsulamiento: método privado de manejo de errores.
-  - Cierre explícito del cursor en todos los métodos (corrige omisión original).
-  - Excepciones especializadas: ClienteDuplicadoError, IntegridadDatosError, BaseDatosError.
+  - Excepciones especializadas: IntegridadDatosError, BaseDatosError.
   - Principio SRP: sólo gestiona la tabla `usuario`, sin lógica de negocio.
+
+CORRECCIÓN #6 — Contraseñas en texto plano:
+    insertar() y actualizar_password() llaman a UTIL.security.hashear()
+    antes de escribir la contraseña en la BD.  De esta manera el campo
+    password_hash nunca almacena texto plano.
 """
 
 from database import DatabaseConnection
@@ -14,6 +18,7 @@ from exceptions import (
     BaseDatosError,
     ValidacionError,
 )
+from UTIL.security import hashear
 
 
 class UsuarioDAO:
@@ -27,14 +32,16 @@ class UsuarioDAO:
     def insertar(self, usuario) -> None:
         """
         Inserta un registro en la tabla usuario.
+        CORRECCIÓN #6: almacena el hash de la contraseña, no el texto plano.
         Lanza IntegridadDatosError si el id ya existe (Duplicate entry).
         """
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
+            pwd_hash = hashear(usuario.password)   # ← CORRECCIÓN #6
             cursor.execute(
                 "INSERT INTO usuario (id_usuario, password_hash, tipo) VALUES (%s, %s, %s)",
-                (usuario.id_usuario, usuario.password, usuario.tipo)
+                (usuario.id_usuario, pwd_hash, usuario.tipo)
             )
             conexion.commit()
         except Exception as e:
@@ -53,7 +60,7 @@ class UsuarioDAO:
         except Exception as e:
             self.__manejar_error(e, "obtener todos los usuarios")
         finally:
-            cursor.close()   # ← faltaba en la versión original
+            cursor.close()
 
     def obtener_por_id(self, id_usuario) -> tuple | None:
         """
@@ -71,18 +78,22 @@ class UsuarioDAO:
         except Exception as e:
             self.__manejar_error(e, f"obtener usuario {id_usuario}")
         finally:
-            cursor.close()   # ← faltaba en la versión original
+            cursor.close()
 
     def actualizar_password(self, id_usuario, nueva_password: str) -> None:
-        """Actualiza únicamente el hash de contraseña de un usuario."""
+        """
+        Actualiza únicamente el hash de contraseña de un usuario.
+        CORRECCIÓN #6: hashea la nueva contraseña antes de guardarla.
+        """
         if not nueva_password or len(nueva_password.strip()) < 4:
             raise ValidacionError("password", "debe tener al menos 4 caracteres")
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
+            pwd_hash = hashear(nueva_password)     # ← CORRECCIÓN #6
             cursor.execute(
                 "UPDATE usuario SET password_hash = %s WHERE id_usuario = %s",
-                (nueva_password, id_usuario)
+                (pwd_hash, id_usuario)
             )
             conexion.commit()
         except Exception as e:

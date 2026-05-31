@@ -1,6 +1,10 @@
 """
 DAO Cliente.
 Aplica Singleton de DB, excepciones especializadas y método de clase fábrica.
+
+CORRECCIÓN #6 — Contraseñas en texto plano:
+    insertar() llama a UTIL.security.hashear() sobre el password antes de
+    escribirlo en la tabla `usuario`.  Así nunca se almacena texto plano.
 """
 
 from database import DatabaseConnection
@@ -11,6 +15,7 @@ from exceptions import (
     IntegridadDatosError,
     BaseDatosError,
 )
+from UTIL.security import hashear
 
 
 class ClienteDAO:
@@ -23,9 +28,10 @@ class ClienteDAO:
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
+            pwd_hash = hashear(cliente.password)   # ← CORRECCIÓN #6
             cursor.execute(
                 "INSERT INTO usuario (id_usuario, password_hash, tipo) VALUES (%s, %s, %s)",
-                (cliente.id_usuario, cliente.password, "cliente")
+                (cliente.id_usuario, pwd_hash, "cliente")
             )
             cursor.execute(
                 "INSERT INTO cliente (id_cliente, nombre, telefono, direccion) VALUES (%s, %s, %s, %s)",
@@ -84,7 +90,6 @@ class ClienteDAO:
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
-            # Verificar que existe
             cursor.execute(
                 "SELECT id_cliente FROM cliente WHERE id_cliente = %s",
                 (id_cliente,)
@@ -92,12 +97,10 @@ class ClienteDAO:
             if not cursor.fetchone():
                 raise ClienteNoEncontradoError(id_cliente)
 
-            # Borrar tabla hija primero
             cursor.execute(
                 "DELETE FROM cliente WHERE id_cliente = %s",
                 (id_cliente,)
             )
-            # Luego tabla padre
             cursor.execute(
                 "DELETE FROM usuario WHERE id_usuario = %s",
                 (id_cliente,)

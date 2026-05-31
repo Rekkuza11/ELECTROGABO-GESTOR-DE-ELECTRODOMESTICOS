@@ -1,11 +1,16 @@
 """
 DAO Empleado.
 Aplica Singleton de DB, excepciones especializadas.
+
+CORRECCIÓN #6 — Contraseñas en texto plano:
+    insertar() llama a UTIL.security.hashear() sobre el password antes de
+    escribirlo en la tabla `usuario`.
 """
 
 from database import DatabaseConnection
 from models.empleado import Empleado
 from exceptions import IntegridadDatosError, BaseDatosError, ValidacionError
+from UTIL.security import hashear
 
 
 class EmpleadoDAO:
@@ -18,9 +23,10 @@ class EmpleadoDAO:
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
+            pwd_hash = hashear(empleado.password)   # ← CORRECCIÓN #6
             cursor.execute(
                 "INSERT INTO usuario (id_usuario, password_hash, tipo) VALUES (%s, %s, %s)",
-                (empleado.id_usuario, empleado.password, "empleado")
+                (empleado.id_usuario, pwd_hash, "empleado")
             )
             cursor.execute(
                 "INSERT INTO empleado (id_empleado, nombre, rol) VALUES (%s, %s, %s)",
@@ -58,7 +64,6 @@ class EmpleadoDAO:
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
-            # Verificar que existe
             cursor.execute(
                 "SELECT id_empleado FROM empleado WHERE id_empleado = %s",
                 (id_empleado,)
@@ -66,12 +71,10 @@ class EmpleadoDAO:
             if not cursor.fetchone():
                 raise BaseDatosError(f"Error en 'eliminar empleado': No existe el empleado {id_empleado}")
 
-            # Borrar tabla hija primero
             cursor.execute(
                 "DELETE FROM empleado WHERE id_empleado = %s",
                 (id_empleado,)
             )
-            # Luego tabla padre
             cursor.execute(
                 "DELETE FROM usuario WHERE id_usuario = %s",
                 (id_empleado,)
