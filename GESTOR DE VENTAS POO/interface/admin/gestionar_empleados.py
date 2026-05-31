@@ -2,6 +2,12 @@
 Vista: Gestión de Empleados.
 Responsabilidad: renderizar el CRUD de empleados dentro del frame de contenido
 del dashboard administrador.
+
+CORRECCIONES — Fase 3:
+  - #8: placeholder de ID corregido de 'Ej: EMP002' a 'Ej: 1111'.
+        usuario.id_empleado es int NOT NULL; el string 'EMP002' era rechazado
+        por la BD.  Se añade validación numérica en _registrar() antes de
+        construir el modelo Empleado y llamar al DAO.
 """
 
 import customtkinter as ctk
@@ -38,7 +44,7 @@ def abrir_gestionar_empleados(parent: ctk.CTkFrame) -> None:
     layout = ctk.CTkFrame(parent, fg_color="transparent")
     layout.pack(fill="both", expand=True, padx=30, pady=(0, 20))
 
-    # ── Panel izquierdo — tabla 8387rcPNz8SRX6pYXgdxCZg3VMLFwtdJB3Z9LeX8Ge2n───
+    # ── Panel izquierdo — tabla ───────────────────────────────────────────────
     panel_izq = ctk.CTkFrame(layout, fg_color="transparent")
     panel_izq.pack(side="left", fill="both", expand=True, padx=(0, 10))
 
@@ -52,21 +58,21 @@ def abrir_gestionar_empleados(parent: ctk.CTkFrame) -> None:
     seccion_titulo(panel_izq, "📋 Personal Registrado")
     tabla = crear_tabla(panel_izq, _COLS, altura=12, anchos=_ANCHOS, expandir=True)
 
-    # ── Panel derecho — formulario 8387rcPNz8SRX6pYXgdxCZg3VMLFwtdJB3Z9LeX8Ge2n
+    # ── Panel derecho — formulario ────────────────────────────────────────────
     panel_der = ctk.CTkFrame(layout, fg_color="transparent", width=340)
     panel_der.pack(side="right", fill="y")
     panel_der.pack_propagate(False)
 
     form_body = panel_formulario(panel_der, "➕ Registrar Nuevo Empleado")
 
-    entry_id     = campo_texto(form_body,     "ID Empleado:",  "Ej: EMP002")
+    # CORRECCIÓN #8: placeholder refleja que el ID debe ser un número entero
+    entry_id     = campo_texto(form_body,     "ID Empleado:",  "Ej: 1111")
     entry_nombre = campo_texto(form_body,     "Nombre:",       "Nombre completo")
     combo_rol    = combo_opciones(form_body,  "Rol:",          _ROLES)
     entry_pwd    = campo_password(form_body,  "Contraseña:")
 
     estado = LabelEstado(form_body)
 
-    # ── Nota informativa sobre roles ──────────────────────────────────────────
     nota = ctk.CTkFrame(form_body, fg_color="#f0f9ff", corner_radius=8)
     nota.pack(fill="x", pady=(8, 0))
     ctk.CTkLabel(nota,
@@ -95,20 +101,32 @@ def abrir_gestionar_empleados(parent: ctk.CTkFrame) -> None:
                 ))
 
     def _registrar():
-        id_emp   = entry_id.get().strip()
-        nombre   = entry_nombre.get().strip()
-        rol      = combo_rol.get().strip()
-        password = entry_pwd.get().strip()
+        id_emp_raw = entry_id.get().strip()
+        nombre     = entry_nombre.get().strip()
+        rol        = combo_rol.get().strip()
+        password   = entry_pwd.get().strip()
 
-        # Validaciones básicas antes de construir el modelo
-        for campo, val in [("ID", id_emp), ("Nombre", nombre),
-                            ("Rol", rol), ("Contraseña", password)]:
+        # Validaciones de campos vacíos
+        for campo, val in [("Nombre", nombre), ("Rol", rol), ("Contraseña", password)]:
             if not validar_no_vacio(val):
                 estado.mostrar(f"El campo '{campo}' no puede estar vacío.", "error")
                 return
 
+        # CORRECCIÓN #8: id_empleado debe ser int positivo (int NOT NULL en BD)
+        if not validar_no_vacio(id_emp_raw):
+            estado.mostrar("El campo 'ID' no puede estar vacío.", "error")
+            return
         try:
-            emp = Empleado(nombre, rol, password, id_emp)
+            id_emp = int(id_emp_raw)
+        except ValueError:
+            estado.mostrar("El campo 'ID' debe ser un número entero (ej: 1111).", "error")
+            return
+        if id_emp <= 0:
+            estado.mostrar("El campo 'ID' debe ser mayor que cero.", "error")
+            return
+
+        try:
+            emp = Empleado(nombre, rol, password, id_emp)   # id_emp es int
             _DAO.insertar(emp)
             estado.mostrar("Empleado registrado correctamente.", "exito")
             _limpiar_form()
@@ -144,7 +162,6 @@ def abrir_gestionar_empleados(parent: ctk.CTkFrame) -> None:
         combo_rol.set(str(fila[2]))
         estado.mostrar(f"Datos del empleado ID {fila[0]} cargados.", "info")
 
-    # Botones
     fila_btns = ctk.CTkFrame(form_body, fg_color="transparent")
     fila_btns.pack(fill="x", pady=(12, 0))
     btn_exito(fila_btns,     "💾 Registrar", _registrar, ancho=130, alto=36).pack(side="left", padx=(0, 8))
