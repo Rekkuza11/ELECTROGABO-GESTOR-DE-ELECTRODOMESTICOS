@@ -5,6 +5,13 @@ Aplica:
   - Método estático: cálculo de margen (no depende del estado de instancia).
   - Método de clase: fábrica desde fila de BD.
   - Excepciones especializadas para stock y precio.
+
+Fase 6:
+  - #21: desde_fila_bd() ya no normaliza precios silenciosamente a 0.01.
+         Si un precio en BD es inválido, PrecioInvalidoError emerge de forma
+         visible en lugar de enmascarar el problema con un valor ficticio.
+  - #24: id_producto.setter lanza ValidacionError si se intenta cambiar un ID
+         ya asignado, en lugar de ignorar la operación en silencio.
 """
 
 from exceptions import StockInsuficienteError, PrecioInvalidoError, ValidacionError
@@ -30,12 +37,12 @@ class Producto:
         stock: int,
         id_producto=None,
     ):
-        self.__id_producto = id_producto
-        self.__nombre = self._validar_nombre(nombre)
-        self.__marca = self._validar_marca(marca)
+        self.__id_producto  = id_producto
+        self.__nombre       = self._validar_nombre(nombre)
+        self.__marca        = self._validar_marca(marca)
         self.__precio_compra = self._validar_precio(precio_compra, "precio_compra")
-        self.__precio_venta = self._validar_precio(precio_venta, "precio_venta")
-        self.__stock = self._validar_stock(stock)
+        self.__precio_venta  = self._validar_precio(precio_venta, "precio_venta")
+        self.__stock        = self._validar_stock(stock)
 
     # ── Propiedades públicas ──────────────────────────────────────────────────
 
@@ -45,10 +52,18 @@ class Producto:
 
     @id_producto.setter
     def id_producto(self, valor) -> None:
-        """Sólo se asigna desde la capa DAO tras insertar en BD."""
+        """
+        CORRECCIÓN #24: ya no silencia el intento de cambiar un ID ya asignado.
+        El ID es inmutable una vez persistido; intentar cambiarlo es un error
+        de programación que debe ser visible de inmediato.
+        """
         if self.__id_producto is None:
             self.__id_producto = valor
-        # Si ya tiene ID, se ignora silenciosamente (inmutabilidad lógica)
+        else:
+            raise ValidacionError(
+                "id_producto",
+                "no se puede cambiar una vez asignado (inmutabilidad post-persistencia)"
+            )
 
     @property
     def nombre(self) -> str:
@@ -91,21 +106,16 @@ class Producto:
     @classmethod
     def desde_fila_bd(cls, fila: tuple) -> "Producto":
         """
-        Fábrica: (id, nombre, marca, precio_compra, precio_venta, stock)
-        Tolerante a precios 0 o negativos que vengan de la BD:
-        los normaliza a 0.01 para no romper la carga del inventario.
+        Fábrica: (id, nombre, marca, precio_compra, precio_venta, stock).
+
+        CORRECCIÓN #21: se elimina la normalización silenciosa de precios a 0.01.
+        Si la BD contiene un precio inválido (cero o negativo), el constructor
+        lanzará PrecioInvalidoError de forma visible, en lugar de sustituir el
+        valor por 0.01 sin ningún aviso.  Esto permite detectar y corregir datos
+        incorrectos en lugar de ocultarlos.
         """
         id_p, nombre, marca, p_compra, p_venta, stock = fila
-        # Normalizar precios: si vienen como 0 o negativos desde BD, usar mínimo 0.01
-        try:
-            p_compra = float(p_compra) if float(p_compra) > 0 else 0.01
-        except (ValueError, TypeError):
-            p_compra = 0.01
-        try:
-            p_venta = float(p_venta) if float(p_venta) > 0 else 0.01
-        except (ValueError, TypeError):
-            p_venta = 0.01
-        return cls(nombre, marca, p_compra, p_venta, stock, id_p)
+        return cls(nombre, marca, float(p_compra), float(p_venta), stock, id_p)
 
     # ── Métodos estáticos ────────────────────────────────────────────────────
 

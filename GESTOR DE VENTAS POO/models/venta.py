@@ -3,7 +3,13 @@ Modelo Venta.
 Aplica:
   - Encapsulamiento: atributos privados, acceso controlado.
   - Método estático: validación de descuento (lógica pura).
-  - Excepciones especializadas: StockInsuficienteError, VentaVaciaError, DescuentoInvalidoError.
+  - Excepciones especializadas: VentaVaciaError, DescuentoInvalidoError.
+
+Fase 6 · Corrección #15:
+  - Se elimina agregar_producto() porque no forma parte del flujo real.
+    VentaController.registrar() inserta venta + detalles + stock en una
+    única transacción SQL atómica sin pasar por este método.
+    Mantenerlo generaba confusión sobre cuál era el camino correcto.
 """
 
 from __future__ import annotations
@@ -20,11 +26,11 @@ class Venta:
     """
 
     def __init__(self, id_venta, id_cliente, id_empleado, fecha=None, total: float = 0.0):
-        self.__id_venta = id_venta
-        self.__id_cliente = id_cliente
+        self.__id_venta    = id_venta
+        self.__id_cliente  = id_cliente
         self.__id_empleado = id_empleado
-        self.__fecha = fecha
-        self.__total = total
+        self.__fecha       = fecha
+        self.__total       = total
         self.__detalles: List = []
 
     # ── Propiedades públicas ──────────────────────────────────────────────────
@@ -74,16 +80,6 @@ class Venta:
         Agrega un DetalleVenta ya construido.
         La reducción de stock debe manejarse en la capa de servicio (SRP).
         """
-        self.__detalles.append(detalle)
-
-    def agregar_producto(self, producto, cantidad: int) -> None:
-        """
-        Crea y agrega un detalle a partir de un producto y cantidad.
-        Delega al producto la validación de stock (lanza StockInsuficienteError).
-        """
-        from models.detalle_venta import DetalleVenta   # import local evita circular
-        producto.reducir_stock(cantidad)
-        detalle = DetalleVenta(producto, cantidad)
         self.__detalles.append(detalle)
 
     def calcular_total(self, descuento: float = 1.0) -> float:
