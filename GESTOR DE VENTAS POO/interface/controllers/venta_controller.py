@@ -4,10 +4,18 @@ Responsabilidad: orquestar el registro de ventas (cabecera + detalles),
 actualización de stock y consultas del historial.
 Aplica SRP — sólo gestiona el flujo de venta.
 
-CORRECCIONES:
-- id_prod se convierte a int antes de buscar en BD (evita mismatch de tipo)
-- actualizar_stock usa el id ya convertido (mismo objeto que se insertó)
-- rollback explícito si falla el stock tras insertar detalles
+CORRECCIONES — Fase 1:
+  - #2:  registrar() — venta, detalles y descuento de stock se ejecutan en
+         una ÚNICA transacción.  Si cualquier paso falla se llama rollback()
+         y la BD queda exactamente como estaba.  Ya no se delegan los INSERT
+         a VentaDAO/DetalleVentaDAO (que hacían commit propios); se ejecutan
+         directamente sobre el cursor compartido.
+  - #18: eliminar() — antes de borrar la venta se consultan sus detalles y se
+         repone el stock de cada producto en la misma transacción atómica.
+         Stock y registros quedan siempre consistentes.
+  - #7  (refuerzo): el UPDATE de stock incluye AND stock >= %s para que el
+         motor rechace la operación si el stock bajó entre la pre-validación
+         y el commit (protección ante concurrencia).
 """
 
 from datetime import datetime
@@ -16,7 +24,6 @@ from dao.venta_dao import VentaDAO
 from dao.detalle_venta_dao import DetalleVentaDAO
 from dao.producto_dao import ProductoDAO
 from dao.cliente_dao import ClienteDAO
-from models.venta import Venta
 from models.detalle_venta import DetalleVenta
 from exceptions import (
     VentaNoEncontradaError,
@@ -65,7 +72,23 @@ class VentaController:
         items: list[tuple],
     ) -> int:
         """
-        Registra una venta completa de forma transaccional.
+        Registra una venta completa de forma ATÓMICA.
+
+        CORRECCIÓN #2:
+            Toda la escritura en BD (INSERT venta, INSERT detalles, UPDATE stock)
+            ocurre dentro de una única transacción con un solo cursor.  Si
+            cualquiera de los pasos falla se invoca rollback() y no queda
+            ningún registro parcial en la base de datos.
+
+        Flujo:
+            1. Normalizar y validar items (en memoria, sin tocar BD).
+            2. Pre-validar existencia y stock de cada producto (SELECTs).
+            3. Abrir transacción única:
+               a. INSERT INTO venta → obtener id_venta.
+               b. INSERT INTO detalle_venta por cada línea.
+               c. UPDATE stock con AND stock >= %s (previene negativos, fix #7).
+                  Si rowcount == 0 → rollback y StockInsuficienteError.
+            4. commit() — o rollback() ante cualquier excepción.
 
         Args:
             id_cliente  — ID del cliente.
@@ -73,87 +96,162 @@ class VentaController:
             items       — lista de (id_producto, cantidad: int).
 
         Retorna:
-            id_venta generado.
+            id_venta generado por AUTO_INCREMENT.
 
         Lanza:
             ValidacionError           — items vacío o cantidad inválida.
-            ProductoNoEncontradoError — si algún producto no existe.
-            StockInsuficienteError    — si no hay stock suficiente.
+            ProductoNoEncontradoError — algún producto no existe.
+            StockInsuficienteError    — stock insuficiente (en pre-validación
+                                        o durante el UPDATE atómico).
             BaseDatosError            — error de infraestructura.
         """
         if not items:
             raise ValidacionError("items", "la venta debe tener al menos un producto")
 
-        # ── 1. Normalizar IDs y validar stock en memoria ───────────────────────
-        # CORRECCIÓN: convertir id_prod a int ANTES de buscar en BD para
-        # evitar que MySQL no haga match por diferencia de tipo str vs int.
+        # ── 1. Normalizar IDs y cantidades ────────────────────────────────────
         items_normalizados: list[tuple] = []
         for id_prod_raw, cantidad_raw in items:
             cantidad = convertir_a_int(cantidad_raw)
             if cantidad <= 0:
                 raise ValidacionError("cantidad", "debe ser mayor que cero")
-
-            # Normalizar id_producto al tipo que espera el DAO (int si es numérico)
             try:
                 id_prod = int(id_prod_raw)
             except (ValueError, TypeError):
-                id_prod = id_prod_raw  # mantener str para IDs alfanuméricos
-
+                id_prod = id_prod_raw  # ID alfanumérico: mantener como str
             items_normalizados.append((id_prod, cantidad))
 
-        # ── 2. Verificar productos y construir detalles ────────────────────────
+        # ── 2. Pre-validación en memoria (sin escribir nada en BD) ────────────
         detalles_obj: list[DetalleVenta] = []
         for id_prod, cantidad in items_normalizados:
             producto = self._producto_dao.obtener_por_id(id_prod)
             if producto.stock < cantidad:
                 raise StockInsuficienteError(producto.nombre, producto.stock, cantidad)
-            detalle = DetalleVenta(producto, cantidad)
-            detalles_obj.append(detalle)
+            detalles_obj.append(DetalleVenta(producto, cantidad))
 
         total = sum(d.subtotal for d in detalles_obj)
 
-        # ── 3. Insertar cabecera de venta ──────────────────────────────────────
-        venta = Venta(None, id_cliente, id_empleado, datetime.now(), total)
-        self._venta_dao.insertar(venta)  # asigna venta.id_venta
-
-        # ── 4. Insertar detalles ───────────────────────────────────────────────
+        # ── 3. Transacción única: venta + detalles + stock ────────────────────
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
+            # 3a. Insertar cabecera de venta
+            cursor.execute(
+                """INSERT INTO venta (id_cliente, id_empleado, fecha, total)
+                   VALUES (%s, %s, %s, %s)""",
+                (id_cliente, id_empleado, datetime.now(), total),
+            )
+            id_venta = cursor.lastrowid
+
+            # 3b. Insertar líneas de detalle
             for detalle in detalles_obj:
                 cursor.execute(
-                    """
-                    INSERT INTO detalle_venta
-                        (id_venta, id_producto, cantidad, precio_unitario, subtotal)
-                    VALUES (%s, %s, %s, %s, %s)
-                    """,
+                    """INSERT INTO detalle_venta
+                           (id_venta, id_producto, cantidad, precio_unitario, subtotal)
+                       VALUES (%s, %s, %s, %s, %s)""",
                     (
-                        venta.id_venta,
+                        id_venta,
                         detalle.id_producto,
                         detalle.cantidad,
                         detalle.precio_unitario,
                         detalle.subtotal,
                     ),
                 )
+
+            # 3c. Descontar stock — AND stock >= %s protege contra negativos (#7)
+            for id_prod, cantidad in items_normalizados:
+                cursor.execute(
+                    "UPDATE producto "
+                    "SET stock = stock - %s "
+                    "WHERE id_producto = %s AND stock >= %s",
+                    (cantidad, id_prod, cantidad),
+                )
+                if cursor.rowcount == 0:
+                    # El stock cambió entre la pre-validación y este UPDATE
+                    # (ej. otra transacción concurrente lo redujo).
+                    cursor.execute(
+                        "SELECT nombre, stock FROM producto WHERE id_producto = %s",
+                        (id_prod,),
+                    )
+                    fila = cursor.fetchone()
+                    if not fila:
+                        raise ProductoNoEncontradoError(id_prod)
+                    raise StockInsuficienteError(fila[0], int(fila[1]), cantidad)
+
+            # Todo correcto: confirmar la transacción completa
             conexion.commit()
+            return id_venta
+
+        except (StockInsuficienteError, ProductoNoEncontradoError, ValidacionError):
+            conexion.rollback()
+            raise
         except Exception as e:
             conexion.rollback()
-            raise BaseDatosError(f"Error al insertar detalles: {e}") from e
+            raise BaseDatosError(f"Error al registrar venta: {e}") from e
         finally:
             cursor.close()
 
-        # ── 5. Descontar stock usando los IDs ya normalizados ──────────────────
-        # CORRECCIÓN: usar items_normalizados (con id_prod ya convertido a int)
-        # para que el UPDATE de stock haga match con la clave primaria correcta.
-        for id_prod, cantidad in items_normalizados:
-            self._producto_dao.actualizar_stock(id_prod, cantidad)
-
-        return venta.id_venta
-
     def eliminar(self, id_venta) -> None:
         """
-        Elimina una venta y sus detalles (sin revertir el stock).
-        Lanza VentaNoEncontradaError si no existe.
+        Elimina una venta y sus detalles revirtiendo el stock descontado.
+
+        CORRECCIÓN #18:
+            Antes de borrar cualquier registro, se recuperan los detalles
+            de la venta y se reponen las unidades de cada producto en la
+            misma transacción.  Si algo falla, rollback() deja la BD intacta:
+            ni la venta se borra ni el stock se modifica.
+
+        Flujo:
+            1. SELECT detalle_venta (lectura previa, cursor independiente).
+            2. Abrir transacción única:
+               a. UPDATE stock = stock + cantidad  por cada detalle.
+               b. DELETE FROM detalle_venta.
+               c. DELETE FROM venta — si rowcount == 0 → VentaNoEncontradaError.
+            3. commit() — o rollback() ante cualquier excepción.
+
+        Lanza:
+            VentaNoEncontradaError — la venta no existe.
+            BaseDatosError         — error de infraestructura.
         """
-        self._detalle_dao.eliminar_por_venta(id_venta)
-        self._venta_dao.eliminar(id_venta)
+        # Obtener detalles ANTES de iniciar la transacción de escritura.
+        # DetalleVentaDAO usa su propio cursor y lo cierra en finally,
+        # por lo que no interfiere con el cursor de la transacción siguiente.
+        detalles = self._detalle_dao.obtener_por_venta(id_venta)
+
+        conexion = self._db.obtener_conexion()
+        cursor = conexion.cursor()
+        try:
+            # Reponer el stock de cada producto involucrado en la venta
+            for fila_detalle in detalles:
+                # Formato de fila: (id_detalle, id_venta, id_producto,
+                #                   cantidad, precio_unitario, subtotal)
+                id_prod  = fila_detalle[2]
+                cantidad = int(fila_detalle[3])
+                cursor.execute(
+                    "UPDATE producto SET stock = stock + %s WHERE id_producto = %s",
+                    (cantidad, id_prod),
+                )
+
+            # Eliminar líneas de detalle
+            cursor.execute(
+                "DELETE FROM detalle_venta WHERE id_venta = %s",
+                (id_venta,),
+            )
+
+            # Eliminar cabecera de venta
+            cursor.execute(
+                "DELETE FROM venta WHERE id_venta = %s",
+                (id_venta,),
+            )
+            if cursor.rowcount == 0:
+                raise VentaNoEncontradaError(id_venta)
+
+            conexion.commit()
+
+        except VentaNoEncontradaError:
+            conexion.rollback()
+            raise
+        except Exception as e:
+            conexion.rollback()
+            raise BaseDatosError(f"Error al eliminar venta {id_venta}: {e}") from e
+        finally:
+            cursor.close()
