@@ -33,13 +33,12 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
                    "📦 Gestión de Productos",
                    "Administra el catálogo e inventario de la tienda")
 
-    # ── Mensaje de error global (visible en la parte superior) ────────────────
+    # ── Mensaje de error global ───────────────────────────────────────────────
     lbl_error_global = ctk.CTkLabel(
         parent, text="", font=("Arial", 12, "bold"),
         text_color="#dc2626", fg_color="#fee2e2",
         corner_radius=8, anchor="w"
     )
-    # Se empaqueta solo si hay error (ver _mostrar_error_global)
 
     def _mostrar_error_global(msg: str):
         lbl_error_global.configure(text=f"  ✗  {msg}")
@@ -76,21 +75,39 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
 
     form_body = panel_formulario(panel_der, "➕ Nuevo / Editar Producto")
 
+    # ── Campo ID (manual, solo visible al crear) ──────────────────────────────
+    entry_id       = campo_numero(form_body, "ID Producto:",   "Ej: 10")
     entry_nombre   = campo_texto(form_body,  "Nombre:",        "Ej: Multímetro Digital")
     entry_marca    = campo_texto(form_body,  "Marca:",         "Ej: Fluke")
     entry_p_compra = campo_numero(form_body, "Precio Compra:", "0.00")
     entry_p_venta  = campo_numero(form_body, "Precio Venta:",  "0.00")
     entry_stock    = campo_numero(form_body, "Stock:",         "0")
 
+    # Aviso sobre el ID
+    aviso_id = ctk.CTkFrame(form_body, fg_color="#fefce8", corner_radius=8)
+    aviso_id.pack(fill="x", pady=(2, 6))
+    ctk.CTkLabel(aviso_id,
+                 text="⚠  El ID es obligatorio y debe ser único.\n"
+                      "Al editar, el ID no se puede cambiar.",
+                 font=("Arial", 10), text_color="#92400e",
+                 justify="left").pack(anchor="w", padx=10, pady=6)
+
     estado = LabelEstado(form_body)
     _id_edicion = {"valor": None}
 
     # ── Acciones ──────────────────────────────────────────────────────────────
 
+    def _set_id_editable(editable: bool):
+        """Habilita o deshabilita el campo ID según si se está creando o editando."""
+        entry_id.configure(state="normal" if editable else "disabled",
+                           fg_color="white" if editable else "#f1f5f9",
+                           text_color="#1e293b" if editable else "#94a3b8")
+
     def _limpiar_form():
-        limpiar_campos(entry_nombre, entry_marca,
+        limpiar_campos(entry_id, entry_nombre, entry_marca,
                        entry_p_compra, entry_p_venta, entry_stock)
         _id_edicion["valor"] = None
+        _set_id_editable(True)
         estado.limpiar()
 
     def _recargar_tabla(filtro: str = ""):
@@ -98,9 +115,7 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
         _ocultar_error_global()
         try:
             productos = _CTRL.listar()
-            print(f"[DEBUG] ProductoController.listar() retornó {len(productos)} productos")
         except Exception as e:
-            print(f"[DEBUG] Error en listar(): {type(e).__name__}: {e}")
             _mostrar_error_global(f"Error al conectar con la base de datos: {e}")
             return
 
@@ -111,14 +126,11 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
             return
 
         filtro_lower = filtro.strip().lower()
-        insertados = 0
         for p in productos:
             try:
-                nombre_lower = p.nombre.lower()
-                marca_lower  = p.marca.lower()
                 if filtro_lower and (
-                    filtro_lower not in nombre_lower
-                    and filtro_lower not in marca_lower
+                    filtro_lower not in p.nombre.lower()
+                    and filtro_lower not in p.marca.lower()
                 ):
                     continue
                 try:
@@ -134,17 +146,14 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
                     p.stock,
                     margen,
                 ))
-                insertados += 1
-            except Exception as e:
-                print(f"[DEBUG] Error al insertar fila de producto: {e}")
+            except Exception:
                 continue
-
-        print(f"[DEBUG] Filas insertadas en tabla: {insertados}")
 
     def _guardar():
         id_ed = _id_edicion["valor"]
         try:
             if id_ed:
+                # Editar: el ID no cambia
                 _CTRL.actualizar(
                     id_ed,
                     entry_nombre.get(), entry_marca.get(),
@@ -152,7 +161,9 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
                 )
                 estado.mostrar("Producto actualizado correctamente.", "exito")
             else:
+                # Crear: se necesita el ID del campo
                 _CTRL.agregar(
+                    entry_id.get(),
                     entry_nombre.get(), entry_marca.get(),
                     entry_p_compra.get(), entry_p_venta.get(), entry_stock.get(),
                 )
@@ -160,7 +171,6 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
             _limpiar_form()
             _recargar_tabla()
         except Exception as e:
-            print(f"[DEBUG] Error en _guardar(): {e}")
             estado.mostrar(str(e), "error")
 
     def _cargar_en_form(event=None):
@@ -168,8 +178,14 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
         if not fila:
             return
         _id_edicion["valor"] = fila[0]
-        limpiar_campos(entry_nombre, entry_marca,
+        limpiar_campos(entry_id, entry_nombre, entry_marca,
                        entry_p_compra, entry_p_venta, entry_stock)
+
+        # Mostrar el ID pero bloquearlo (no se edita)
+        _set_id_editable(True)
+        entry_id.insert(0, str(fila[0]))
+        _set_id_editable(False)
+
         entry_nombre.insert(0,   str(fila[1]))
         entry_marca.insert(0,    str(fila[2]))
         entry_p_compra.insert(0, str(fila[3]).replace("$", "").replace(",", ""))
@@ -203,12 +219,10 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
     btn_secundario(fila_btns, "✕ Limpiar", _limpiar_form,
                    ancho=100, alto=36).pack(side="left")
 
-    # Botón recargar — definido DESPUÉS de _recargar_tabla
     btn_secundario(barra, "↺  Recargar", _recargar_tabla,
                    ancho=110, alto=34).pack(side="left", padx=(0, 8), pady=10)
 
     entry_buscar.bind("<KeyRelease>", lambda e: _recargar_tabla(entry_buscar.get()))
     tabla.bind("<Double-1>", _cargar_en_form)
 
-    # Carga inicial
     _recargar_tabla()
