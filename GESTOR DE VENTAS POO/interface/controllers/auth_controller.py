@@ -3,10 +3,17 @@ Controller: Autenticación.
 Responsabilidad: verificar credenciales contra la BD y determinar el tipo
 de usuario que intenta iniciar sesión.
 Aplica SRP — sólo gestiona el proceso de login/logout.
+
+CORRECCIÓN #6 — Contraseñas en texto plano:
+    El método login() ya no compara password_hash == password en texto plano.
+    Ahora usa UTIL.security.verificar() que hace la comparación contra el
+    hash HMAC-SHA256 almacenado.  Esto garantiza que aunque la BD sea
+    comprometida, las contraseñas originales no queden expuestas.
 """
 
 from database import DatabaseConnection
 from exceptions import CredencialesInvalidasError, BaseDatosError
+from UTIL.security import verificar
 
 
 class AuthController:
@@ -25,6 +32,11 @@ class AuthController:
     def login(self, id_usuario: str, password: str) -> dict:
         """
         Verifica las credenciales del usuario en la tabla `usuario`.
+
+        CORRECCIÓN #6:
+            La contraseña ingresada se hashea antes de comparar, usando
+            UTIL.security.verificar() con hmac.compare_digest para evitar
+            ataques de timing.
 
         Retorna:
             dict con claves 'id', 'tipo' si las credenciales son válidas.
@@ -46,7 +58,9 @@ class AuthController:
                 raise CredencialesInvalidasError(id_usuario)
 
             id_u, pwd_hash, tipo = fila
-            if pwd_hash != password:
+
+            # CORRECCIÓN #6: verificar usando hash, no comparación directa
+            if not verificar(password, pwd_hash):
                 raise CredencialesInvalidasError(id_usuario)
 
             self._sesion_activa = {"id": id_u, "tipo": tipo}
