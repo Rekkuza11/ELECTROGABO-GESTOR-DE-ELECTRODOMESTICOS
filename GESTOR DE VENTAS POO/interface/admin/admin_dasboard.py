@@ -5,6 +5,11 @@ Responsabilidad: ventana principal del panel administrador.
 - Frame de contenido intercambiable.
 - Carga dinámica de vistas (productos, clientes, empleados, ventas, reportes).
 - Usa únicamente componentes de interface/components/.
+
+CORRECCIÓN #13 — Dashboard no muestra empleados:
+    La tarjeta "Empleados" mostraba "—" fijo porque el valor no venía del
+    controller.  Ahora lee datos.get("empleados_activos", 0) que
+    ReporteController.resumen_dashboard() provee correctamente.
 """
 
 import customtkinter as ctk
@@ -220,6 +225,10 @@ def _vista_inicio(parent: ctk.CTkFrame) -> None:
     """
     Renderiza el panel de inicio con KPIs y alertas de inventario.
     Usa exclusivamente los componentes de interface/components/.
+
+    CORRECCIÓN #13:
+        La tarjeta "Empleados" ahora lee datos.get("empleados_activos", 0)
+        en lugar del "—" hardcodeado que tenía antes.
     """
     # Encabezado
     cabecera_vista(parent,
@@ -229,8 +238,8 @@ def _vista_inicio(parent: ctk.CTkFrame) -> None:
     # Intentar cargar KPIs desde el ReporteController
     try:
         from interface.controllers.reporte_controller import ReporteController
-        ctrl   = ReporteController()
-        datos  = ctrl.resumen_dashboard()
+        ctrl    = ReporteController()
+        datos   = ctrl.resumen_dashboard()
         alertas = ctrl.alertas_stock()
     except Exception:
         datos   = {}
@@ -262,9 +271,10 @@ def _vista_inicio(parent: ctk.CTkFrame) -> None:
     # ── Fila 2 de tarjetas ────────────────────────────────────────────────────
     fila2 = fila_tarjetas(parent)
 
+    # CORRECCIÓN #13: usar datos.get("empleados_activos") en lugar de "—" fijo
     tarjeta_stat(
         fila2, "👤", "#f97316",
-        "—",
+        str(datos.get("empleados_activos", 0)),
         "Empleados",
         "Personal activo",
     )
