@@ -2,6 +2,10 @@
 Vista: Gestión de Productos.
 Responsabilidad: renderizar el CRUD de productos dentro del frame de contenido
 del dashboard administrador.
+
+CORRECCIONES — Fase 3:
+  - #4: entry_id cambia de campo_numero a campo_texto y el placeholder refleja
+        que el ID puede ser alfanumérico (varchar(20) en BD, ej. 'PD66322').
 """
 
 import customtkinter as ctk
@@ -21,7 +25,7 @@ from UTIL.helpers import formatear_moneda
 _CTRL = ProductoController()
 
 _COLS   = ("ID", "Nombre", "Marca", "P. Compra", "P. Venta", "Stock", "Margen %")
-_ANCHOS = [60, 200, 120, 110, 110, 70, 80]
+_ANCHOS = [80, 200, 120, 110, 110, 70, 80]
 
 
 def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
@@ -75,19 +79,18 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
 
     form_body = panel_formulario(panel_der, "➕ Nuevo / Editar Producto")
 
-    # ── Campo ID (manual, solo visible al crear) ──────────────────────────────
-    entry_id       = campo_numero(form_body, "ID Producto:",   "Ej: 10")
+    # CORRECCIÓN #4: campo_texto (no campo_numero) y placeholder alfanumérico
+    entry_id       = campo_texto(form_body,  "ID Producto:",   "Ej: PD66322")
     entry_nombre   = campo_texto(form_body,  "Nombre:",        "Ej: Multímetro Digital")
     entry_marca    = campo_texto(form_body,  "Marca:",         "Ej: Fluke")
     entry_p_compra = campo_numero(form_body, "Precio Compra:", "0.00")
     entry_p_venta  = campo_numero(form_body, "Precio Venta:",  "0.00")
     entry_stock    = campo_numero(form_body, "Stock:",         "0")
 
-    # Aviso sobre el ID
     aviso_id = ctk.CTkFrame(form_body, fg_color="#fefce8", corner_radius=8)
     aviso_id.pack(fill="x", pady=(2, 6))
     ctk.CTkLabel(aviso_id,
-                 text="⚠  El ID es obligatorio y debe ser único.\n"
+                 text="⚠  El ID es obligatorio, único y puede ser alfanumérico.\n"
                       "Al editar, el ID no se puede cambiar.",
                  font=("Arial", 10), text_color="#92400e",
                  justify="left").pack(anchor="w", padx=10, pady=6)
@@ -98,7 +101,6 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
     # ── Acciones ──────────────────────────────────────────────────────────────
 
     def _set_id_editable(editable: bool):
-        """Habilita o deshabilita el campo ID según si se está creando o editando."""
         entry_id.configure(state="normal" if editable else "disabled",
                            fg_color="white" if editable else "#f1f5f9",
                            text_color="#1e293b" if editable else "#94a3b8")
@@ -153,7 +155,6 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
         id_ed = _id_edicion["valor"]
         try:
             if id_ed:
-                # Editar: el ID no cambia
                 _CTRL.actualizar(
                     id_ed,
                     entry_nombre.get(), entry_marca.get(),
@@ -161,7 +162,6 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
                 )
                 estado.mostrar("Producto actualizado correctamente.", "exito")
             else:
-                # Crear: se necesita el ID del campo
                 _CTRL.agregar(
                     entry_id.get(),
                     entry_nombre.get(), entry_marca.get(),
@@ -181,7 +181,6 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
         limpiar_campos(entry_id, entry_nombre, entry_marca,
                        entry_p_compra, entry_p_venta, entry_stock)
 
-        # Mostrar el ID pero bloquearlo (no se edita)
         _set_id_editable(True)
         entry_id.insert(0, str(fila[0]))
         _set_id_editable(False)

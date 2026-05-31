@@ -6,6 +6,11 @@ del dashboard administrador.
 NOTA DE PRIVACIDAD: El administrador NO ingresa la contraseña del cliente.
 Se genera automáticamente una contraseña temporal que el cliente debe cambiar
 en su primer inicio de sesión.
+
+CORRECCIONES — Fase 3:
+  - #8: placeholder de ID corregido de 'Ej: CLI001' a 'Ej: 443322'.
+        usuario.id_cliente es int NOT NULL; el string 'CLI001' era rechazado
+        por la BD.  La validación numérica ahora vive en ClienteController.
 """
 
 import secrets
@@ -67,12 +72,12 @@ def abrir_gestionar_clientes(parent: ctk.CTkFrame) -> None:
 
     form_body = panel_formulario(panel_der, "➕ Registrar Nuevo Cliente")
 
-    entry_id       = campo_texto(form_body, "ID Cliente:",  "Ej: CLI001")
+    # CORRECCIÓN #8: placeholder refleja que el ID debe ser un número entero
+    entry_id       = campo_texto(form_body, "ID Cliente:",  "Ej: 443322")
     entry_nombre   = campo_texto(form_body, "Nombre:",      "Nombre completo")
     entry_telefono = campo_texto(form_body, "Teléfono:",    "Ej: 3001234567")
     entry_dir      = campo_texto(form_body, "Dirección:",   "Calle / barrio")
 
-    # Aviso de privacidad — sin campo de contraseña
     aviso = ctk.CTkFrame(form_body, fg_color="#f0f9ff", corner_radius=8)
     aviso.pack(fill="x", pady=(6, 2))
     ctk.CTkLabel(aviso,
@@ -81,7 +86,6 @@ def abrir_gestionar_clientes(parent: ctk.CTkFrame) -> None:
                  font=("Arial", 10), text_color="#0369a1",
                  justify="left").pack(anchor="w", padx=10, pady=8)
 
-    # Etiqueta para mostrar la contraseña generada tras el registro
     lbl_pwd_generada = ctk.CTkLabel(form_body, text="", font=("Arial", 11),
                                     text_color="#15803d", wraplength=280)
     lbl_pwd_generada.pack(anchor="w", padx=4, pady=(2, 0))
@@ -120,7 +124,6 @@ def abrir_gestionar_clientes(parent: ctk.CTkFrame) -> None:
                 text=f"🔑 Contraseña temporal: {pwd_temp}\n"
                      "(Entréguela al cliente de forma segura)"
             )
-            # No limpiamos el form inmediatamente para que se vea la contraseña
             limpiar_campos(entry_id, entry_nombre, entry_telefono, entry_dir)
             _recargar_tabla()
         except Exception as e:
@@ -155,7 +158,6 @@ def abrir_gestionar_clientes(parent: ctk.CTkFrame) -> None:
         entry_dir.insert(0, str(fila[3]))
         estado.mostrar(f"Datos del cliente ID {fila[0]} cargados.", "info")
 
-    # Botones del formulario
     fila_btns = ctk.CTkFrame(form_body, fg_color="transparent")
     fila_btns.pack(fill="x", pady=(12, 0))
     btn_exito(fila_btns,     "💾 Registrar", _registrar, ancho=130, alto=36).pack(side="left", padx=(0, 8))
