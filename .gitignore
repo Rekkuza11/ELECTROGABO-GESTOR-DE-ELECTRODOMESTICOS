@@ -8,3 +8,12 @@ __pycache__/
 # Entornos virtuales
 venv/
 .venv/
+
+# ── Fase 2: Seguridad ─────────────────────────────────────────────────────────
+# NUNCA subir credenciales ni secretos al repositorio
+.env
+.env.*
+!.env.example
+
+# Archivos de certificados (excepto el que ya estaba en el repo)
+# certs/*.pem  ← descomentar si se agrega más certificados locales
