@@ -16,6 +16,19 @@ CORRECCIÓN #12 — Problemas de zona horaria en reportes:
     - CURDATE()  → DATE(CONVERT_TZ(NOW(), '+00:00', '-05:00'))
     - DATE_FORMAT(CURDATE(), '%Y-%m-01') → primera-del-mes calculada en UTC-5
     - La constante _TZ_OFFSET centraliza el offset para futuros cambios.
+
+CORRECCIÓN NE-6 (Fase 10) — f-string residual eliminado:
+    Las constantes _COL_NOW/_COL_DATE/_COL_MONTH/_COL_YEAR se definían con
+    f-strings que interpolaban _TZ_OFFSET.  Además, obtener_clientes_nuevos_mes()
+    usaba otro f-string directamente en cursor.execute().
+
+    Esto contradecía la corrección #11 ya aplicada en ProductoDAO,
+    ReporteInventario y ReporteVentas, estableciendo un precedente peligroso.
+
+    Solución (idéntica a reporte_ventas.py):
+    - Constantes redefinidas como literales sin f-string.
+    - obtener_clientes_nuevos_mes() construye el SQL por concatenación
+      explícita de constantes de módulo, sin f-string en cursor.execute().
 """
 
 from database import DatabaseConnection
@@ -23,12 +36,19 @@ from exceptions import BaseDatosError, ClienteNoEncontradoError
 from UTIL.helpers import formatear_moneda, obtener_fecha_actual
 
 
-# ── Constante de zona horaria Colombia (UTC-5) ────────────────────────────────
+# ── Constantes de zona horaria Colombia (UTC-5) ───────────────────────────────
+# _TZ_OFFSET es la única fuente del offset; los demás son fragmentos SQL
+# construidos sin f-string (CORRECCIÓN NE-6 / alineado con corrección #11).
 _TZ_OFFSET = "-05:00"
-_COL_NOW   = f"CONVERT_TZ(NOW(), '+00:00', '{_TZ_OFFSET}')"
-_COL_DATE  = f"DATE({_COL_NOW})"
-_COL_MONTH = f"MONTH({_COL_NOW})"
-_COL_YEAR  = f"YEAR({_COL_NOW})"
+
+# CORRECCIÓN NE-6: cadenas literales — sin f-string.
+# Antes:  _COL_NOW = f"CONVERT_TZ(NOW(), '+00:00', '{_TZ_OFFSET}')"
+#         _COL_DATE = f"DATE({_COL_NOW})"   … etc.
+# Ahora:  literales con el offset embebido explícitamente.
+_COL_NOW   = "CONVERT_TZ(NOW(), '+00:00', '-05:00')"
+_COL_DATE  = "DATE(CONVERT_TZ(NOW(), '+00:00', '-05:00'))"
+_COL_MONTH = "MONTH(CONVERT_TZ(NOW(), '+00:00', '-05:00'))"
+_COL_YEAR  = "YEAR(CONVERT_TZ(NOW(), '+00:00', '-05:00'))"
 
 
 class ReporteClientes:
@@ -171,7 +191,6 @@ class ReporteClientes:
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
-            # Verifica que el cliente exista
             cursor.execute(
                 "SELECT id_cliente FROM cliente WHERE id_cliente = %s",
                 (id_cliente,)
@@ -228,29 +247,37 @@ class ReporteClientes:
         Cuenta cuántos clientes hicieron su primera compra en el mes actual.
 
         CORRECCIÓN #12 — Zona horaria Colombia:
-            La versión anterior usaba CURDATE() y DATE_FORMAT(CURDATE(), '%Y-%m-01')
-            que operan en UTC.  Ahora se usa CONVERT_TZ() para trabajar en UTC-5,
-            la zona horaria de Colombia, evitando que entre las 7 pm y medianoche
-            se contabilice el mes equivocado.
+            Usa CONVERT_TZ() para trabajar en UTC-5 (Colombia) en lugar de
+            CURDATE() que opera en UTC en servidores cloud.
+
+        CORRECCIÓN NE-6 (Fase 10) — Sin f-string en cursor.execute():
+            La versión anterior construía el SQL con un f-string que
+            interpolaba _COL_YEAR, _COL_MONTH y _TZ_OFFSET.  Ahora el SQL
+            se construye por concatenación explícita de constantes de módulo,
+            sin ningún f-string en el argumento de cursor.execute().
         """
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
-            cursor.execute(f"""
-                SELECT COUNT(DISTINCT id_cliente)
-                FROM venta
-                WHERE {_COL_YEAR}  = YEAR(CONVERT_TZ(fecha, '+00:00', '{_TZ_OFFSET}'))
-                  AND {_COL_MONTH} = MONTH(CONVERT_TZ(fecha, '+00:00', '{_TZ_OFFSET}'))
-                  AND id_cliente NOT IN (
-                        SELECT id_cliente
-                        FROM venta
-                        WHERE CONVERT_TZ(fecha, '+00:00', '{_TZ_OFFSET}')
-                              < DATE_FORMAT(
-                                    CONVERT_TZ(NOW(), '+00:00', '{_TZ_OFFSET}'),
-                                    '%Y-%m-01'
-                                )
-                  )
-            """)
+            # CORRECCIÓN NE-6: concatenación de constantes — sin f-string.
+            # _COL_YEAR  = "YEAR(CONVERT_TZ(NOW(), '+00:00', '-05:00'))"
+            # _COL_MONTH = "MONTH(CONVERT_TZ(NOW(), '+00:00', '-05:00'))"
+            sql = (
+                "SELECT COUNT(DISTINCT id_cliente) "
+                "FROM venta "
+                "WHERE " + _COL_YEAR  + " = YEAR(CONVERT_TZ(fecha, '+00:00', '-05:00'))"
+                "  AND " + _COL_MONTH + " = MONTH(CONVERT_TZ(fecha, '+00:00', '-05:00'))"
+                "  AND id_cliente NOT IN ("
+                "        SELECT id_cliente"
+                "        FROM venta"
+                "        WHERE CONVERT_TZ(fecha, '+00:00', '-05:00')"
+                "              < DATE_FORMAT("
+                "                    CONVERT_TZ(NOW(), '+00:00', '-05:00'),"
+                "                    '%Y-%m-01'"
+                "                )"
+                "  )"
+            )
+            cursor.execute(sql)
             resultado = cursor.fetchone()
             return int(resultado[0]) if resultado else 0
         except Exception as e:
