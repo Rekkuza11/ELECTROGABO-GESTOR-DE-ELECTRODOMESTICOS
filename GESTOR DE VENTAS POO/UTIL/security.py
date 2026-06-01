@@ -1,36 +1,39 @@
 """
 UTIL/security.py — Utilitario de seguridad para contraseñas.
 
-CORRECCIÓN #6 — Contraseñas en texto plano:
-    Este módulo centraliza toda la lógica de hashing de contraseñas.
-    Se usa hashlib.sha256 con un salt fijo por aplicación (HMAC-like),
-    lo que es significativamente más seguro que texto plano sin requerir
-    librerías externas adicionales como bcrypt.
+CORRECCIÓN #6 (Fase 2): hashear() implementa HMAC-SHA256 con APP_SECRET.
 
-    Para una implementación de mayor seguridad en producción avanzada,
-    se puede reemplazar el cuerpo de hashear() por bcrypt.hashpw(),
-    sin cambiar ningún otro archivo del proyecto.
+CORRECCIÓN NE-2 (Fase 7) — Fallback para contraseñas sin migrar:
+    La migración migrar_passwords.py debe ejecutarse en cada nuevo despliegue,
+    pero si por algún motivo se omite (entorno de desarrollo recién clonado,
+    restauración de backup antiguo, etc.), verificar() comparaba el HMAC del
+    password ingresado contra el texto plano almacenado y devolvía False,
+    bloqueando el acceso a todos los usuarios.
 
-Uso:
-    from UTIL.security import hashear, verificar
+    Solución:
+    - verificar() detecta si hash_guardado ES ya un hash (64 hex chars via
+      es_hash()) o es texto plano (longitud distinta o chars no-hex).
+    - Si es texto plano: comparación directa con hmac.compare_digest para
+      mantener resistencia a timing attacks, y aviso en stderr para que el
+      operador sepa que hay contraseñas sin migrar.
+    - Si es hash: camino normal con HMAC.
 
-    hash_guardado = hashear("mi_password")      # al registrar / cambiar clave
-    es_valido     = verificar("mi_password", hash_guardado)  # al hacer login
+    NOTA: el fallback NO es una puerta trasera — sigue siendo una comparación
+    estricta. Solo evita que un despliegue sin migración bloquee el sistema.
+    La solución definitiva siempre es ejecutar migrar_passwords.py.
 """
 
 import hashlib
 import hmac
 import os
+import sys
 
-# Salt de aplicación: se puede sobreescribir con variable de entorno APP_SECRET.
-# No es un salt por-usuario (para eso se necesitaría bcrypt), pero es
-# infinitamente mejor que texto plano.
 _APP_SECRET: str = os.environ.get("APP_SECRET", "electrogabo_2026_s3cr3t_k3y")
 
 
 def hashear(password: str) -> str:
     """
-    Genera el hash SHA-256 (HMAC) de una contraseña en texto plano.
+    Genera el hash HMAC-SHA256 de una contraseña en texto plano.
 
     Args:
         password — contraseña original del usuario.
@@ -55,28 +58,52 @@ def hashear(password: str) -> str:
 def verificar(password_plano: str, hash_guardado: str) -> bool:
     """
     Compara una contraseña en texto plano con su hash almacenado.
-    Usa comparación segura (hmac.compare_digest) para prevenir ataques de timing.
+
+    CORRECCIÓN NE-2 (Fase 7):
+        Si hash_guardado no es un hash SHA-256 válido (es decir, la BD aún
+        tiene contraseñas en texto plano porque no se ejecutó la migración),
+        se realiza una comparación directa con hmac.compare_digest para
+        evitar ataques de timing.  Se emite una advertencia a stderr para
+        que el operador sepa que debe ejecutar migrar_passwords.py.
 
     Args:
         password_plano — contraseña ingresada por el usuario.
-        hash_guardado  — hash almacenado en la base de datos.
+        hash_guardado  — valor almacenado en la BD (hash o texto plano).
 
     Returns:
-        True si la contraseña coincide con el hash, False en caso contrario.
+        True si la contraseña coincide, False en caso contrario.
     """
     if not password_plano or not hash_guardado:
         return False
+
     try:
+        if not es_hash(hash_guardado):
+            # ── Fallback: contraseña sin migrar (texto plano en BD) ───────────
+            # Advertencia visible en consola/logs para el operador del sistema.
+            print(
+                "[SECURITY WARNING] Contraseña sin hashear detectada en BD. "
+                "Ejecute: python scripts/migrar_passwords.py",
+                file=sys.stderr,
+            )
+            # Comparación de texto plano resistente a timing attacks
+            return hmac.compare_digest(
+                password_plano.encode("utf-8"),
+                hash_guardado.encode("utf-8"),
+            )
+
+        # ── Camino normal: comparación con hash ───────────────────────────────
         hash_calculado = hashear(password_plano)
         return hmac.compare_digest(hash_calculado, hash_guardado)
+
     except Exception:
         return False
 
 
 def es_hash(valor: str) -> bool:
     """
-    Heurística para detectar si un valor ya está hasheado (sha256 = 64 hex chars).
-    Se usa durante la migración para no hashear dos veces.
+    Heurística: detecta si un valor ya es un hash SHA-256 (64 chars hex).
+    Usada durante la migración para no hashear dos veces, y en verificar()
+    para el fallback NE-2.
     """
     if not valor or not isinstance(valor, str):
         return False
