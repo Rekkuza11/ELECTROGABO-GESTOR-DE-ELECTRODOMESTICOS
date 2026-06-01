@@ -28,6 +28,12 @@ CORRECCIÓN #11 — SQL dinámico mediante f-string:
     - _tabla se conserva como atributo de clase para documentar qué tabla
       gestiona este DAO, pero ya NO se usa en ningún cursor.execute().
     - Toda la parametrización de valores de usuario sigue usando %s.
+
+FASE 8 — Eliminación segura:
+  - tiene_ventas(id): consulta si el producto aparece en algún detalle_venta
+    antes de intentar el DELETE.  La vista llama a este método y muestra un
+    mensaje claro al usuario en lugar de dejar que el motor lance un error
+    de FK constraint genérico e ininteligible.
 """
 
 from database import DatabaseConnection
@@ -153,6 +159,36 @@ class ProductoDAO:
         except Exception as e:
             conexion.rollback()
             self.__manejar_error(e, f"eliminar producto {id_producto}")
+        finally:
+            cursor.close()
+
+    # ── Validación de dependencias FK (Fase 8) ────────────────────────────────
+
+    def tiene_ventas(self, id_producto) -> bool:
+        """
+        FASE 8 — Pre-validación de FK antes de eliminar.
+
+        Consulta si el producto aparece en al menos una fila de detalle_venta.
+        La vista _eliminar() debe llamar a este método ANTES de invocar
+        eliminar(), de modo que el usuario reciba un mensaje comprensible
+        en lugar del error de FK constraint genérico del motor de BD.
+
+        Retorna:
+            True  — el producto tiene ventas asociadas y NO puede eliminarse.
+            False — el producto no tiene ventas y puede eliminarse con seguridad.
+        """
+        conexion = self._db.obtener_conexion()
+        cursor = conexion.cursor()
+        try:
+            cursor.execute(
+                "SELECT 1 FROM detalle_venta WHERE id_producto = %s LIMIT 1",
+                (id_producto,)
+            )
+            return cursor.fetchone() is not None
+        except Exception as e:
+            raise BaseDatosError(
+                f"Error al verificar ventas del producto {id_producto}: {e}"
+            ) from e
         finally:
             cursor.close()
 

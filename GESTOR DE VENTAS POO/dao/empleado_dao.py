@@ -5,6 +5,12 @@ Aplica Singleton de DB, excepciones especializadas.
 CORRECCIÓN #6 — Contraseñas en texto plano:
     insertar() llama a UTIL.security.hashear() sobre el password antes de
     escribirlo en la tabla `usuario`.
+
+FASE 8 — Eliminación segura:
+  - tiene_ventas(id): consulta si el empleado es referenciado en alguna venta
+    antes de intentar el DELETE.  La vista _eliminar() llama a este método
+    primero y muestra un mensaje comprensible en lugar de dejar que el motor
+    lance un FK constraint error genérico e ininteligible.
 """
 
 from database import DatabaseConnection
@@ -85,6 +91,41 @@ class EmpleadoDAO:
         except Exception as e:
             conexion.rollback()
             self.__manejar_error(e, f"eliminar empleado {id_empleado}")
+        finally:
+            cursor.close()
+
+    # ── Validación de dependencias FK (Fase 8) ────────────────────────────────
+
+    def tiene_ventas(self, id_empleado) -> bool:
+        """
+        FASE 8 — Pre-validación de FK antes de eliminar.
+
+        Consulta si el empleado (o usuario admin) está referenciado en alguna
+        venta de la tabla `venta`.  La vista _eliminar() debe llamar a este
+        método ANTES de invocar eliminar(), de modo que el usuario reciba un
+        mensaje claro ("No se puede eliminar: el empleado tiene ventas
+        registradas") en lugar del FK constraint error crudo del motor.
+
+        Nota: la columna venta.id_empleado referencia usuario.id_usuario
+        (tras la migración de Fase 3, Fix #1), por lo que esta consulta
+        funciona tanto para empleados como para administradores.
+
+        Retorna:
+            True  — el empleado tiene ventas y NO puede eliminarse.
+            False — el empleado no tiene ventas y puede eliminarse con seguridad.
+        """
+        conexion = self._db.obtener_conexion()
+        cursor = conexion.cursor()
+        try:
+            cursor.execute(
+                "SELECT 1 FROM venta WHERE id_empleado = %s LIMIT 1",
+                (id_empleado,)
+            )
+            return cursor.fetchone() is not None
+        except Exception as e:
+            raise BaseDatosError(
+                f"Error al verificar ventas del empleado {id_empleado}: {e}"
+            ) from e
         finally:
             cursor.close()
 

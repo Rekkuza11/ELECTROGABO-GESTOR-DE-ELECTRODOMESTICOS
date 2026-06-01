@@ -11,6 +11,11 @@ CORRECCIONES — Fase 3:
   - #8: placeholder de ID corregido de 'Ej: CLI001' a 'Ej: 443322'.
         usuario.id_cliente es int NOT NULL; el string 'CLI001' era rechazado
         por la BD.  La validación numérica ahora vive en ClienteController.
+
+FASE 8 — Eliminación segura:
+  - _eliminar() llama a ClienteDAO.tiene_ventas() antes de intentar el DELETE.
+    Si el cliente tiene ventas asociadas, se muestra un aviso comprensible al
+    usuario en lugar de dejar que el motor lance un FK constraint error crudo.
 """
 
 import secrets
@@ -130,6 +135,16 @@ def abrir_gestionar_clientes(parent: ctk.CTkFrame) -> None:
             estado.mostrar(str(e), "error")
 
     def _eliminar():
+        """
+        FASE 8 — Pre-valida FK antes de intentar el DELETE.
+
+        1. Verifica que haya una fila seleccionada.
+        2. Pide confirmación al usuario.
+        3. Llama a ClienteDAO.tiene_ventas() para detectar dependencias en
+           la tabla venta antes de invocar _CTRL.eliminar().
+        4. Si tiene ventas, muestra un aviso claro sin tocar la BD.
+        5. Si no tiene ventas, procede con la eliminación normal.
+        """
         fila = fila_seleccionada(tabla)
         if not fila:
             estado.mostrar("Selecciona un cliente de la tabla.", "advertencia")
@@ -138,6 +153,21 @@ def abrir_gestionar_clientes(parent: ctk.CTkFrame) -> None:
                          f"¿Eliminar al cliente '{fila[1]}' permanentemente?\n"
                          f"Se eliminarán también sus datos de acceso."):
             return
+
+        # FASE 8: pre-validación de FK
+        try:
+            from dao.cliente_dao import ClienteDAO
+            if ClienteDAO().tiene_ventas(fila[0]):
+                msg_error(
+                    "No se puede eliminar",
+                    f"El cliente '{fila[1]}' tiene ventas registradas.\n"
+                    "No es posible eliminarlo para preservar el historial de ventas."
+                )
+                return
+        except Exception as e:
+            msg_error("Error", f"No se pudo verificar dependencias: {e}")
+            return
+
         try:
             _CTRL.eliminar(fila[0])
             exito("Eliminado", f"Cliente '{fila[1]}' eliminado correctamente.")

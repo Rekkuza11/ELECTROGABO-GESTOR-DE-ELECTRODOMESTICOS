@@ -8,6 +8,12 @@ CORRECCIONES — Fase 3:
         usuario.id_empleado es int NOT NULL; el string 'EMP002' era rechazado
         por la BD.  Se añade validación numérica en _registrar() antes de
         construir el modelo Empleado y llamar al DAO.
+
+FASE 8 — Eliminación segura:
+  - _eliminar() llama a EmpleadoDAO.tiene_ventas() antes de intentar el DELETE.
+    Si el empleado tiene ventas registradas, se muestra un aviso comprensible
+    al usuario en lugar de dejar que el motor lance un FK constraint error
+    genérico e ininteligible.
 """
 
 import customtkinter as ctk
@@ -137,6 +143,16 @@ def abrir_gestionar_empleados(parent: ctk.CTkFrame) -> None:
             estado.mostrar(str(e), "error")
 
     def _eliminar():
+        """
+        FASE 8 — Pre-valida FK antes de intentar el DELETE.
+
+        1. Verifica que haya una fila seleccionada.
+        2. Pide confirmación al usuario.
+        3. Llama a EmpleadoDAO.tiene_ventas() para detectar dependencias en
+           la tabla venta antes de invocar _DAO.eliminar().
+        4. Si tiene ventas, muestra un aviso claro sin tocar la BD.
+        5. Si no tiene ventas, procede con la eliminación normal.
+        """
         fila = fila_seleccionada(tabla)
         if not fila:
             estado.mostrar("Selecciona un empleado de la tabla.", "advertencia")
@@ -144,6 +160,20 @@ def abrir_gestionar_empleados(parent: ctk.CTkFrame) -> None:
         if not confirmar("Eliminar empleado",
                          f"¿Eliminar al empleado '{fila[1]}' permanentemente?"):
             return
+
+        # FASE 8: pre-validación de FK
+        try:
+            if _DAO.tiene_ventas(fila[0]):
+                msg_error(
+                    "No se puede eliminar",
+                    f"El empleado '{fila[1]}' tiene ventas registradas.\n"
+                    "No es posible eliminarlo para preservar el historial de ventas."
+                )
+                return
+        except Exception as e:
+            msg_error("Error", f"No se pudo verificar dependencias: {e}")
+            return
+
         try:
             _DAO.eliminar(fila[0])
             exito("Eliminado", f"Empleado '{fila[1]}' eliminado.")
