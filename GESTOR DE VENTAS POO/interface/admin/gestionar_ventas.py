@@ -17,6 +17,14 @@ CORRECCIÓN #10 — Uso de traceback en producción:
     sistema, lo que representa un riesgo de seguridad real.
     El mensaje de error ya se muestra al usuario a través de
     estado_venta.mostrar(str(e), "error"), que es suficiente.
+
+Fase 9 · Corrección #23 — String incorrecto en diálogo de eliminación:
+    El mensaje de confirmación al eliminar una venta decía
+    "Esta acción no revierte el stock descontado.", lo cual era
+    correcto antes de la corrección #18 pero quedó desactualizado
+    una vez que VentaController.eliminar() comenzó a reponer el stock
+    de cada producto dentro de la misma transacción atómica.
+    Se corrige al texto que refleja el comportamiento real del sistema.
 """
 
 import customtkinter as ctk
@@ -85,13 +93,17 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
         if not fila:
             estado_hist.mostrar("Selecciona una venta del historial.", "advertencia")
             return
+
+        # CORRECCIÓN #23: el mensaje original decía "Esta acción no revierte
+        # el stock descontado." — incorrecto desde la corrección #18, que
+        # implementó la reversión atómica del stock al eliminar una venta.
         if not confirmar("Eliminar venta",
                          f"¿Eliminar la venta ID {fila[0]} por {fila[2]}?\n"
-                         "Esta acción no revierte el stock descontado."):
+                         "El stock de los productos será repuesto automáticamente."):
             return
         try:
             _CTRL_VENTA.eliminar(fila[0])
-            exito("Eliminada", f"Venta ID {fila[0]} eliminada.")
+            exito("Eliminada", f"Venta ID {fila[0]} eliminada y stock repuesto.")
             _recargar_historial()
         except Exception as e:
             msg_error("Error", str(e))

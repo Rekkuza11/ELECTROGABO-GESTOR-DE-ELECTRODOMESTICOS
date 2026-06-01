@@ -2,10 +2,21 @@
 Vista: Historial de Compras del Cliente.
 Responsabilidad: mostrar al cliente sus propias compras con detalle
 de productos por venta.
+
+Fase 9 · Corrección NE-3:
+  - Se elimina la función local _crear_tabla() duplicada que existía
+    al final de este módulo.
+  - Se elimina el import directo de tkinter.ttk, que solo era necesario
+    para la función local eliminada.
+  - Todas las tablas ahora se crean mediante crear_tabla() del componente
+    centralizado interface.components.tablas, coherente con el resto de
+    vistas del sistema (ventas_report, clientes_report, inventario_report,
+    clientes_view — ya corregidos en Fase 6 / corrección #20).
+  - Se usa expandir=False en ambas llamadas para replicar el comportamiento
+    original de fill="x" de la función local.
 """
 
 import customtkinter as ctk
-from tkinter import ttk
 
 from interface.components.cards import cabecera_vista, seccion_titulo
 from interface.components.tablas import crear_tabla, limpiar
@@ -28,7 +39,7 @@ def abrir_historial(parent: ctk.CTkFrame, id_usuario: str) -> None:
     try:
         from reports.reporte_clientes import ReporteClientes
         rc = ReporteClientes()
-        historial = rc.obtener_historial_cliente(id_usuario)
+        historial     = rc.obtener_historial_cliente(id_usuario)
         total_compras = len(historial)
         monto_total   = sum(float(row[2]) for row in historial) if historial else 0.0
         promedio      = round(monto_total / total_compras, 2) if total_compras else 0.0
@@ -56,8 +67,12 @@ def abrir_historial(parent: ctk.CTkFrame, id_usuario: str) -> None:
     seccion_titulo(scroll, "🧾 Listado de Compras")
 
     cols_hist = ("ID Venta", "Fecha", "Total", "Atendido por")
-    tabla_hist = _crear_tabla(scroll, cols_hist,
-                              anchos=[100, 180, 130, 180], altura=6)
+
+    # NE-3: crear_tabla() centralizado — expandir=False replica fill="x" original
+    tabla_hist = crear_tabla(
+        scroll, cols_hist,
+        altura=6, anchos=[100, 180, 130, 180], expandir=False,
+    )
 
     if historial:
         for id_v, fecha, total, empleado in historial:
@@ -84,8 +99,12 @@ def abrir_historial(parent: ctk.CTkFrame, id_usuario: str) -> None:
     lbl_instruccion.pack(anchor="w", padx=15, pady=12)
 
     cols_det = ("Producto", "Marca", "Cantidad", "Precio Unitario", "Subtotal")
-    tabla_det = _crear_tabla(detalle_frame, cols_det,
-                             anchos=[200, 130, 90, 140, 130], altura=5)
+
+    # NE-3: crear_tabla() centralizado — expandir=False replica fill="x" original
+    tabla_det = crear_tabla(
+        detalle_frame, cols_det,
+        altura=5, anchos=[200, 130, 90, 140, 130], expandir=False,
+    )
 
     lbl_total_venta = ctk.CTkLabel(
         detalle_frame, text="",
@@ -119,11 +138,11 @@ def abrir_historial(parent: ctk.CTkFrame, id_usuario: str) -> None:
             subtotal_acum = 0.0
             if detalles:
                 for fila in detalles:
-                    # fila: (id_detalle, id_venta, id_producto, cantidad,
-                    #         precio_unitario, subtotal)
+                    # fila: (id_detalle, id_venta, id_producto,
+                    #         cantidad, precio_unitario, subtotal)
                     _, __, id_prod, cant, precio_u, sub = fila
                     try:
-                        prod = prod_dao.obtener_por_id(id_prod)
+                        prod  = prod_dao.obtener_por_id(id_prod)
                         nombre = prod.nombre
                         marca  = prod.marca
                     except Exception:
@@ -154,6 +173,7 @@ def abrir_historial(parent: ctk.CTkFrame, id_usuario: str) -> None:
 # ── Helpers internos ──────────────────────────────────────────────────────────
 
 def _tarjeta(parent, icono, color, valor, titulo, subtitulo):
+    """Tarjeta de estadística compacta para el panel de resumen."""
     card = ctk.CTkFrame(parent, fg_color="white", corner_radius=12, height=150)
     card.pack(side="left", expand=True, fill="both", padx=(0, 10))
     card.pack_propagate(False)
@@ -162,40 +182,9 @@ def _tarjeta(parent, icono, color, valor, titulo, subtitulo):
                  fg_color=color, text_color="white",
                  width=45, height=45, corner_radius=10).pack(
                      anchor="w", padx=20, pady=(18, 8))
-    ctk.CTkLabel(card, text=valor, font=("Arial", 20, "bold"),
+    ctk.CTkLabel(card, text=valor,    font=("Arial", 20, "bold"),
                  text_color="#1e293b").pack(anchor="w", padx=20)
-    ctk.CTkLabel(card, text=titulo, font=("Arial", 13, "bold"),
+    ctk.CTkLabel(card, text=titulo,   font=("Arial", 13, "bold"),
                  text_color="#1e293b").pack(anchor="w", padx=20)
     ctk.CTkLabel(card, text=subtitulo, font=("Arial", 11),
                  text_color="gray").pack(anchor="w", padx=20, pady=(0, 18))
-
-
-def _crear_tabla(parent, columnas, anchos=None, altura=6):
-    estilo = ttk.Style()
-    estilo.theme_use("default")
-    estilo.configure("ElectroGabo.Treeview",
-                     background="white", foreground="#1e293b",
-                     rowheight=30, fieldbackground="white",
-                     font=("Arial", 11))
-    estilo.configure("ElectroGabo.Treeview.Heading",
-                     background="#f1f5f9", foreground="#64748b",
-                     font=("Arial", 11, "bold"))
-    estilo.map("ElectroGabo.Treeview",
-               background=[("selected", "#dbeafe")])
-
-    frame = ctk.CTkFrame(parent, fg_color="white", corner_radius=10)
-    frame.pack(fill="x", pady=(0, 10), padx=10 if parent.__class__.__name__ == "CTkFrame" else 0)
-
-    tabla = ttk.Treeview(frame, columns=columnas, show="headings",
-                         style="ElectroGabo.Treeview", height=altura)
-    for i, col in enumerate(columnas):
-        tabla.heading(col, text=col)
-        w = anchos[i] if anchos and i < len(anchos) else 140
-        tabla.column(col, anchor="center", width=w)
-
-    scroll_y = ttk.Scrollbar(frame, orient="vertical", command=tabla.yview)
-    tabla.configure(yscrollcommand=scroll_y.set)
-    tabla.pack(side="left", fill="both", expand=True, padx=10, pady=10)
-    scroll_y.pack(side="right", fill="y", pady=10)
-
-    return tabla
