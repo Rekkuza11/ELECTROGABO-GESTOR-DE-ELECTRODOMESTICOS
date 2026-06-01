@@ -3,12 +3,15 @@ Controller: Producto.
 Responsabilidad: mediar entre la vista de gestión de productos y el ProductoDAO.
 Aplica SRP — sólo orquesta operaciones CRUD sobre productos.
 
-CORRECCIONES — Fase 3:
-  - #4: _validar_id() ya no convierte el ID a int.
-        La BD define id_producto como varchar(20), por lo que IDs como
-        'PD66322' son válidos.  Forzar int() rechazaba estos valores
-        y causaba ValidacionError al editar o registrar productos reales.
-        El método ahora devuelve str (compatible con varchar(20) en BD).
+CORRECCIONES aplicadas:
+  - #4  (Fase 3): _validar_id() devuelve str compatible con varchar(20).
+  - NE-1 (Fase 7): _validar_precio() elimina caracteres de formato monetario
+        ("$", ",", espacios) antes de intentar la conversión a float.
+        Sin este paso, valores como "$1,200,000.00" que provienen del
+        formulario de edición (_cargar_en_form ya hacía replace, pero
+        rutas alternativas podían omitirlo) lanzaban ValueError dentro
+        de convertir_a_float() y devolvían 0.0, pasando la guardia de
+        es_numero_positivo() silenciosamente con precio cero.
 """
 
 from dao.producto_dao import ProductoDAO
@@ -58,11 +61,11 @@ class ProductoController:
         Valida y registra un nuevo producto con ID manual obligatorio.
         Lanza ValidacionError si algún campo es inválido.
         """
-        id_p = self._validar_id(id_producto)   # str, compatible con varchar(20)
+        id_p = self._validar_id(id_producto)
         self._validar_texto(nombre, "Nombre")
         self._validar_texto(marca, "Marca")
         pc = self._validar_precio(precio_compra, "Precio Compra")
-        pv = self._validar_precio(precio_venta, "Precio Venta")
+        pv = self._validar_precio(precio_venta,  "Precio Venta")
         st = self._validar_stock(stock)
 
         producto = Producto(nombre.strip(), marca.strip(), pc, pv, st, id_p)
@@ -80,7 +83,7 @@ class ProductoController:
         self._validar_texto(nombre, "Nombre")
         self._validar_texto(marca, "Marca")
         pc = self._validar_precio(precio_compra, "Precio Compra")
-        pv = self._validar_precio(precio_venta, "Precio Venta")
+        pv = self._validar_precio(precio_venta,  "Precio Venta")
         st = self._validar_stock(stock)
 
         producto = Producto(nombre.strip(), marca.strip(), pc, pv, st, id_producto)
@@ -95,17 +98,14 @@ class ProductoController:
     def _validar_id(valor: str) -> str:
         """
         CORRECCIÓN #4 — id_producto es varchar(20) en la BD, no int.
-
-        La versión anterior hacía int(val), lo que rechazaba IDs alfanuméricos
-        como 'PD66322' con ValidacionError.  Ahora se acepta cualquier cadena
-        no vacía de hasta 20 caracteres, que es lo que el motor espera.
+        Acepta cualquier cadena no vacía de hasta 20 caracteres.
         """
         val = str(valor).strip()
         if not val:
             raise ValidacionError("ID Producto", "no puede estar vacío")
         if len(val) > 20:
             raise ValidacionError("ID Producto", "máximo 20 caracteres (varchar en BD)")
-        return val  # str — compatible con la columna varchar(20)
+        return val
 
     @staticmethod
     def _validar_texto(valor: str, campo: str) -> str:
@@ -115,9 +115,31 @@ class ProductoController:
 
     @staticmethod
     def _validar_precio(valor: str, campo: str) -> float:
-        if not es_numero_positivo(valor):
+        """
+        CORRECCIÓN NE-1 (Fase 7) — Limpieza de formato monetario.
+
+        El formulario de edición (_cargar_en_form) ya hacía .replace("$","")
+        y .replace(",","") al cargar el valor desde la tabla, pero otras rutas
+        de acceso (p. ej. copiar-pegar desde un campo externo, o formatear el
+        valor antes de enviarlo) podían llegar con el formato completo
+        "$1,200,000.00".  convertir_a_float() usa float() directamente y
+        lanza ValueError ante cualquier caracter no numérico, devolviendo
+        después 0.0 desde el helper — lo que silenciosamente pasaba la guardia
+        de es_numero_positivo() con un precio incorrecto.
+
+        Solución: limpiar el string ANTES de cualquier comprobación numérica.
+        """
+        # Eliminar símbolos de formato monetario y espacios
+        limpio = (
+            str(valor)
+            .replace("$", "")
+            .replace(",", "")
+            .replace(" ", "")
+            .strip()
+        )
+        if not es_numero_positivo(limpio):
             raise ValidacionError(campo, "debe ser un número mayor que cero")
-        return convertir_a_float(valor)
+        return convertir_a_float(limpio)
 
     @staticmethod
     def _validar_stock(valor: str) -> int:
