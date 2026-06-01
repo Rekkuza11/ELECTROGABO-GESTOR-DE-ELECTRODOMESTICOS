@@ -5,6 +5,12 @@ Aplica Singleton de DB, excepciones especializadas y método de clase fábrica.
 CORRECCIÓN #6 — Contraseñas en texto plano:
     insertar() llama a UTIL.security.hashear() sobre el password antes de
     escribirlo en la tabla `usuario`.  Así nunca se almacena texto plano.
+
+FASE 8 — Eliminación segura:
+  - tiene_ventas(id): consulta si el cliente es referenciado en alguna venta
+    antes de intentar el DELETE.  La vista _eliminar() llama a este método
+    primero y muestra un mensaje comprensible en lugar de dejar que el motor
+    lance un FK constraint error genérico.
 """
 
 from database import DatabaseConnection
@@ -111,6 +117,37 @@ class ClienteDAO:
         except Exception as e:
             conexion.rollback()
             self.__manejar_error(e, f"eliminar cliente {id_cliente}")
+        finally:
+            cursor.close()
+
+    # ── Validación de dependencias FK (Fase 8) ────────────────────────────────
+
+    def tiene_ventas(self, id_cliente) -> bool:
+        """
+        FASE 8 — Pre-validación de FK antes de eliminar.
+
+        Consulta si el cliente tiene al menos una venta registrada en la tabla
+        `venta`.  La vista _eliminar() debe llamar a este método ANTES de
+        invocar eliminar(), de modo que el usuario reciba un mensaje claro
+        ("No se puede eliminar: el cliente tiene ventas registradas") en lugar
+        del FK constraint error crudo del motor de base de datos.
+
+        Retorna:
+            True  — el cliente tiene ventas y NO puede eliminarse.
+            False — el cliente no tiene ventas y puede eliminarse con seguridad.
+        """
+        conexion = self._db.obtener_conexion()
+        cursor = conexion.cursor()
+        try:
+            cursor.execute(
+                "SELECT 1 FROM venta WHERE id_cliente = %s LIMIT 1",
+                (id_cliente,)
+            )
+            return cursor.fetchone() is not None
+        except Exception as e:
+            raise BaseDatosError(
+                f"Error al verificar ventas del cliente {id_cliente}: {e}"
+            ) from e
         finally:
             cursor.close()
 

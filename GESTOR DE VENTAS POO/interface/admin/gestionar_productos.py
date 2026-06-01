@@ -6,6 +6,12 @@ del dashboard administrador.
 CORRECCIONES — Fase 3:
   - #4: entry_id cambia de campo_numero a campo_texto y el placeholder refleja
         que el ID puede ser alfanumérico (varchar(20) en BD, ej. 'PD66322').
+
+FASE 8 — Eliminación segura:
+  - _eliminar() llama a ProductoDAO.tiene_ventas() antes de intentar el DELETE.
+    Si el producto tiene ventas asociadas en detalle_venta, se muestra un aviso
+    comprensible al usuario en lugar de dejar que el motor lance un FK
+    constraint error genérico.
 """
 
 import customtkinter as ctk
@@ -193,6 +199,16 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
         estado.mostrar(f"Editando producto ID {fila[0]}", "info")
 
     def _eliminar():
+        """
+        FASE 8 — Pre-valida FK antes de intentar el DELETE.
+
+        1. Verifica que haya una fila seleccionada.
+        2. Pide confirmación al usuario.
+        3. Llama a ProductoDAO.tiene_ventas() para detectar dependencias en
+           detalle_venta antes de invocar _CTRL.eliminar().
+        4. Si tiene ventas, muestra un aviso claro sin tocar la BD.
+        5. Si no tiene ventas, procede con la eliminación normal.
+        """
         fila = fila_seleccionada(tabla)
         if not fila:
             estado.mostrar("Selecciona un producto de la tabla.", "advertencia")
@@ -200,6 +216,22 @@ def abrir_gestionar_productos(parent: ctk.CTkFrame) -> None:
         if not confirmar("Eliminar producto",
                          f"¿Eliminar '{fila[1]}' permanentemente?"):
             return
+
+        # FASE 8: pre-validación de FK
+        try:
+            from dao.producto_dao import ProductoDAO
+            if ProductoDAO().tiene_ventas(fila[0]):
+                msg_error(
+                    "No se puede eliminar",
+                    f"El producto '{fila[1]}' tiene ventas registradas.\n"
+                    "No es posible eliminarlo para preservar el historial de ventas.\n\n"
+                    "Si deseas retirarlo del catálogo, reduce su stock a 0."
+                )
+                return
+        except Exception as e:
+            msg_error("Error", f"No se pudo verificar dependencias: {e}")
+            return
+
         try:
             _CTRL.eliminar(fila[0])
             exito("Eliminado", f"Producto '{fila[1]}' eliminado.")
