@@ -17,23 +17,23 @@ CORRECCIONES — Fase 1:
 CORRECCIÓN #11 — SQL dinámico mediante f-string:
     Los métodos obtener_todos(), obtener_por_id() y eliminar() usaban
     f"... FROM {self._tabla} ..." para construir las queries.
-    Aunque _tabla es una constante de clase nunca derivada de entrada del
-    usuario, el patrón f-string en cursor.execute() es una mala práctica:
-    establece un precedente peligroso que, si alguien llega a alimentar
-    _tabla con datos externos, derivaría en SQL injection.
+    Solución: tabla hardcodeada directamente en cada SQL.
 
-    Solución:
-    - Se elimina la interpolación de {self._tabla} en todas las queries.
-    - El nombre de tabla "producto" se hardcodea directamente en cada SQL.
-    - _tabla se conserva como atributo de clase para documentar qué tabla
-      gestiona este DAO, pero ya NO se usa en ningún cursor.execute().
-    - Toda la parametrización de valores de usuario sigue usando %s.
+CORRECCIÓN NE-TYPE — Mismatch de tipo en id_producto:
+    Tkinter Treeview retorna valores numéricos como int de Python aunque la
+    columna id_producto sea varchar(20) en la BD (ej: "44444" → 44444).
+    Cuando ese int se pasa como parámetro %s a MySQL/TiDB, el motor intenta
+    castear TODAS las filas de id_producto a INTEGER para comparar, y falla
+    al encontrar valores alfanuméricos como 'PD8827':
+        "1292 (22007): Truncated incorrect INTEGER value: 'PD8827'"
+
+    Solución: castear str(id_producto) en TODOS los métodos que usan el
+    id como parámetro de query. Así MySQL siempre recibe un string y compara
+    varchar contra varchar correctamente.
 
 FASE 8 — Eliminación segura:
   - tiene_ventas(id): consulta si el producto aparece en algún detalle_venta
-    antes de intentar el DELETE.  La vista llama a este método y muestra un
-    mensaje claro al usuario en lugar de dejar que el motor lance un error
-    de FK constraint genérico e ininteligible.
+    antes de intentar el DELETE.
 """
 
 from database import DatabaseConnection
@@ -50,9 +50,7 @@ class ProductoDAO:
     """Objeto de acceso a datos para la entidad Producto."""
 
     # Atributo de clase — identifica la tabla que gestiona este DAO.
-    # CORRECCIÓN #11: ya NO se interpola en f-strings de SQL; el nombre
-    # de tabla se escribe literalmente en cada query para evitar el
-    # patrón de SQL dinámico.
+    # CORRECCIÓN #11: ya NO se interpola en f-strings de SQL.
     _tabla: str = "producto"
 
     def __init__(self):
@@ -73,7 +71,8 @@ class ProductoDAO:
                     (id_producto, nombre, marca, precio_compra, precio_venta, stock)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """
-            cursor.execute(sql, (producto.id_producto,) + self.__a_valores(producto))
+            # CORRECCIÓN NE-TYPE: id siempre como str
+            cursor.execute(sql, (str(producto.id_producto),) + self.__a_valores(producto))
             conexion.commit()
         except Exception as e:
             conexion.rollback()
@@ -104,10 +103,10 @@ class ProductoDAO:
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
-            # CORRECCIÓN #11: tabla hardcodeada; id_producto sigue siendo %s.
+            # CORRECCIÓN NE-TYPE: str() garantiza comparación varchar vs varchar.
             cursor.execute(
                 "SELECT * FROM producto WHERE id_producto = %s",
-                (id_producto,)
+                (str(id_producto),)
             )
             fila = cursor.fetchone()
             if not fila:
@@ -129,7 +128,8 @@ class ProductoDAO:
                 SET nombre=%s, marca=%s, precio_compra=%s, precio_venta=%s, stock=%s
                 WHERE id_producto=%s
             """
-            valores = self.__a_valores(producto) + (producto.id_producto,)
+            # CORRECCIÓN NE-TYPE: str() en el id del WHERE
+            valores = self.__a_valores(producto) + (str(producto.id_producto),)
             cursor.execute(sql, valores)
             if cursor.rowcount == 0:
                 raise ProductoNoEncontradoError(producto.id_producto)
@@ -146,10 +146,10 @@ class ProductoDAO:
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
-            # CORRECCIÓN #11: tabla hardcodeada; id_producto sigue siendo %s.
+            # CORRECCIÓN NE-TYPE: str() garantiza comparación varchar vs varchar.
             cursor.execute(
                 "DELETE FROM producto WHERE id_producto = %s",
-                (id_producto,)
+                (str(id_producto),)
             )
             if cursor.rowcount == 0:
                 raise ProductoNoEncontradoError(id_producto)
@@ -168,10 +168,10 @@ class ProductoDAO:
         """
         FASE 8 — Pre-validación de FK antes de eliminar.
 
-        Consulta si el producto aparece en al menos una fila de detalle_venta.
-        La vista _eliminar() debe llamar a este método ANTES de invocar
-        eliminar(), de modo que el usuario reciba un mensaje comprensible
-        en lugar del error de FK constraint genérico del motor de BD.
+        CORRECCIÓN NE-TYPE: str(id_producto) evita que MySQL intente castear
+        todos los valores varchar de id_producto a INTEGER cuando el parámetro
+        llega como int desde Tkinter Treeview, lo que causaba:
+            "1292 (22007): Truncated incorrect INTEGER value: 'PD8827'"
 
         Retorna:
             True  — el producto tiene ventas asociadas y NO puede eliminarse.
@@ -180,9 +180,10 @@ class ProductoDAO:
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
         try:
+            # CORRECCIÓN NE-TYPE: str() garantiza comparación varchar vs varchar.
             cursor.execute(
                 "SELECT 1 FROM detalle_venta WHERE id_producto = %s LIMIT 1",
-                (id_producto,)
+                (str(id_producto),)
             )
             return cursor.fetchone() is not None
         except Exception as e:
@@ -198,12 +199,8 @@ class ProductoDAO:
         """
         Descuenta `cantidad` unidades del stock del producto.
 
-        CORRECCIÓN #7 — Prevención de stock negativo:
-            El UPDATE incluye la cláusula 'AND stock >= %s', de modo que el
-            motor de base de datos rechaza la operación si las unidades
-            disponibles son insuficientes.  Si rowcount == 0 se distingue
-            entre 'producto inexistente' y 'stock insuficiente' haciendo un
-            SELECT adicional dentro del mismo bloque, antes del rollback.
+        CORRECCIÓN #7: cláusula AND stock >= %s previene stock negativo.
+        CORRECCIÓN NE-TYPE: str(id_producto) en todos los parámetros.
         """
         conexion = self._db.obtener_conexion()
         cursor = conexion.cursor()
@@ -212,12 +209,12 @@ class ProductoDAO:
                 "UPDATE producto "
                 "SET stock = stock - %s "
                 "WHERE id_producto = %s AND stock >= %s",
-                (cantidad, id_producto, cantidad),
+                (cantidad, str(id_producto), cantidad),
             )
             if cursor.rowcount == 0:
                 cursor.execute(
                     "SELECT nombre, stock FROM producto WHERE id_producto = %s",
-                    (id_producto,),
+                    (str(id_producto),),
                 )
                 fila = cursor.fetchone()
                 if not fila:
@@ -237,13 +234,7 @@ class ProductoDAO:
     def aumentar_stock(self, id_producto, cantidad: int) -> None:
         """
         CORRECCIÓN #19 — Método para reponer stock.
-            Incrementa en `cantidad` las unidades disponibles del producto.
-            Usado principalmente desde venta_controller.eliminar() para
-            revertir el stock al cancelar una venta (fix #18).
-
-        Lanza:
-            BaseDatosError            — si `cantidad` no es positiva.
-            ProductoNoEncontradoError — si el producto no existe en BD.
+        CORRECCIÓN NE-TYPE: str(id_producto) en todos los parámetros.
         """
         if cantidad <= 0:
             raise BaseDatosError(
@@ -255,7 +246,7 @@ class ProductoDAO:
         try:
             cursor.execute(
                 "UPDATE producto SET stock = stock + %s WHERE id_producto = %s",
-                (cantidad, id_producto),
+                (cantidad, str(id_producto)),
             )
             if cursor.rowcount == 0:
                 raise ProductoNoEncontradoError(id_producto)
