@@ -6,16 +6,17 @@ Aplica SRP — sólo gestiona el flujo de venta.
 
 CORRECCIONES — Fase 1:
   - #2:  registrar() — venta, detalles y descuento de stock se ejecutan en
-         una ÚNICA transacción.  Si cualquier paso falla se llama rollback()
-         y la BD queda exactamente como estaba.  Ya no se delegan los INSERT
-         a VentaDAO/DetalleVentaDAO (que hacían commit propios); se ejecutan
-         directamente sobre el cursor compartido.
+         una ÚNICA transacción.
   - #18: eliminar() — antes de borrar la venta se consultan sus detalles y se
          repone el stock de cada producto en la misma transacción atómica.
-         Stock y registros quedan siempre consistentes.
-  - #7  (refuerzo): el UPDATE de stock incluye AND stock >= %s para que el
-         motor rechace la operación si el stock bajó entre la pre-validación
-         y el commit (protección ante concurrencia).
+  - #7  (refuerzo): el UPDATE de stock incluye AND stock >= %s.
+
+CORRECCIÓN NE-TYPE — Mismatch de tipo en id_producto:
+    Los UPDATE/SELECT de stock dentro de registrar() y eliminar() usaban
+    id_prod tal como venía del carrito (puede ser int si el ID es numérico,
+    p. ej. 44444).  MySQL/TiDB al comparar un INTEGER contra una columna
+    varchar(20) intenta castear todas las filas y falla con 'PD8827'.
+    Solución: str(id_prod) en todos los parámetros que tocan id_producto.
 """
 
 from datetime import datetime
@@ -74,21 +75,9 @@ class VentaController:
         """
         Registra una venta completa de forma ATÓMICA.
 
-        CORRECCIÓN #2:
-            Toda la escritura en BD (INSERT venta, INSERT detalles, UPDATE stock)
-            ocurre dentro de una única transacción con un solo cursor.  Si
-            cualquiera de los pasos falla se invoca rollback() y no queda
-            ningún registro parcial en la base de datos.
-
-        Flujo:
-            1. Normalizar y validar items (en memoria, sin tocar BD).
-            2. Pre-validar existencia y stock de cada producto (SELECTs).
-            3. Abrir transacción única:
-               a. INSERT INTO venta → obtener id_venta.
-               b. INSERT INTO detalle_venta por cada línea.
-               c. UPDATE stock con AND stock >= %s (previene negativos, fix #7).
-                  Si rowcount == 0 → rollback y StockInsuficienteError.
-            4. commit() — o rollback() ante cualquier excepción.
+        CORRECCIÓN #2: toda la escritura ocurre en una única transacción.
+        CORRECCIÓN #7: UPDATE stock con AND stock >= %s previene negativos.
+        CORRECCIÓN NE-TYPE: str(id_prod) en todos los parámetros de producto.
 
         Args:
             id_cliente  — ID del cliente.
@@ -97,13 +86,6 @@ class VentaController:
 
         Retorna:
             id_venta generado por AUTO_INCREMENT.
-
-        Lanza:
-            ValidacionError           — items vacío o cantidad inválida.
-            ProductoNoEncontradoError — algún producto no existe.
-            StockInsuficienteError    — stock insuficiente (en pre-validación
-                                        o durante el UPDATE atómico).
-            BaseDatosError            — error de infraestructura.
         """
         if not items:
             raise ValidacionError("items", "la venta debe tener al menos un producto")
@@ -114,10 +96,8 @@ class VentaController:
             cantidad = convertir_a_int(cantidad_raw)
             if cantidad <= 0:
                 raise ValidacionError("cantidad", "debe ser mayor que cero")
-            try:
-                id_prod = int(id_prod_raw)
-            except (ValueError, TypeError):
-                id_prod = id_prod_raw  # ID alfanumérico: mantener como str
+            # CORRECCIÓN NE-TYPE: siempre guardar id como str para las queries
+            id_prod = str(id_prod_raw).strip()
             items_normalizados.append((id_prod, cantidad))
 
         # ── 2. Pre-validación en memoria (sin escribir nada en BD) ────────────
@@ -150,7 +130,7 @@ class VentaController:
                        VALUES (%s, %s, %s, %s, %s)""",
                     (
                         id_venta,
-                        detalle.id_producto,
+                        str(detalle.id_producto),   # CORRECCIÓN NE-TYPE
                         detalle.cantidad,
                         detalle.precio_unitario,
                         detalle.subtotal,
@@ -163,21 +143,18 @@ class VentaController:
                     "UPDATE producto "
                     "SET stock = stock - %s "
                     "WHERE id_producto = %s AND stock >= %s",
-                    (cantidad, id_prod, cantidad),
+                    (cantidad, str(id_prod), cantidad),   # CORRECCIÓN NE-TYPE
                 )
                 if cursor.rowcount == 0:
-                    # El stock cambió entre la pre-validación y este UPDATE
-                    # (ej. otra transacción concurrente lo redujo).
                     cursor.execute(
                         "SELECT nombre, stock FROM producto WHERE id_producto = %s",
-                        (id_prod,),
+                        (str(id_prod),),                  # CORRECCIÓN NE-TYPE
                     )
                     fila = cursor.fetchone()
                     if not fila:
                         raise ProductoNoEncontradoError(id_prod)
                     raise StockInsuficienteError(fila[0], int(fila[1]), cantidad)
 
-            # Todo correcto: confirmar la transacción completa
             conexion.commit()
             return id_venta
 
@@ -194,27 +171,9 @@ class VentaController:
         """
         Elimina una venta y sus detalles revirtiendo el stock descontado.
 
-        CORRECCIÓN #18:
-            Antes de borrar cualquier registro, se recuperan los detalles
-            de la venta y se reponen las unidades de cada producto en la
-            misma transacción.  Si algo falla, rollback() deja la BD intacta:
-            ni la venta se borra ni el stock se modifica.
-
-        Flujo:
-            1. SELECT detalle_venta (lectura previa, cursor independiente).
-            2. Abrir transacción única:
-               a. UPDATE stock = stock + cantidad  por cada detalle.
-               b. DELETE FROM detalle_venta.
-               c. DELETE FROM venta — si rowcount == 0 → VentaNoEncontradaError.
-            3. commit() — o rollback() ante cualquier excepción.
-
-        Lanza:
-            VentaNoEncontradaError — la venta no existe.
-            BaseDatosError         — error de infraestructura.
+        CORRECCIÓN #18: se repone stock en la misma transacción atómica.
+        CORRECCIÓN NE-TYPE: str(id_prod) en UPDATE de stock.
         """
-        # Obtener detalles ANTES de iniciar la transacción de escritura.
-        # DetalleVentaDAO usa su propio cursor y lo cierra en finally,
-        # por lo que no interfiere con el cursor de la transacción siguiente.
         detalles = self._detalle_dao.obtener_por_venta(id_venta)
 
         conexion = self._db.obtener_conexion()
@@ -224,7 +183,7 @@ class VentaController:
             for fila_detalle in detalles:
                 # Formato de fila: (id_detalle, id_venta, id_producto,
                 #                   cantidad, precio_unitario, subtotal)
-                id_prod  = fila_detalle[2]
+                id_prod  = str(fila_detalle[2])   # CORRECCIÓN NE-TYPE
                 cantidad = int(fila_detalle[3])
                 cursor.execute(
                     "UPDATE producto SET stock = stock + %s WHERE id_producto = %s",
