@@ -25,6 +25,11 @@ Fase 9 · Corrección #23 — String incorrecto en diálogo de eliminación:
     una vez que VentaController.eliminar() comenzó a reponer el stock
     de cada producto dentro de la misma transacción atómica.
     Se corrige al texto que refleja el comportamiento real del sistema.
+
+MÓDULO DE FACTURACIÓN:
+    Se añade _generar_factura() que delega en UTIL.factura_helper.generar_factura().
+    El botón "📄 Factura" aparece en la barra de acciones del historial.
+    Requiere: pip install fpdf2
 """
 
 import customtkinter as ctk
@@ -108,10 +113,28 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
         except Exception as e:
             msg_error("Error", str(e))
 
+    # ── FACTURACIÓN ───────────────────────────────────────────────────────────
+    def _generar_factura():
+        """
+        Genera el PDF de factura para la venta seleccionada en el historial.
+        Delega toda la lógica en UTIL.factura_helper.generar_factura().
+        """
+        fila = fila_seleccionada(tabla_hist)
+        if not fila:
+            estado_hist.mostrar("Selecciona una venta para facturar.", "advertencia")
+            return
+        try:
+            from UTIL.factura_helper import generar_factura
+            ruta = generar_factura(fila[0])
+            exito("Factura generada", f"Archivo guardado en:\n{ruta}")
+        except Exception as e:
+            msg_error("Error al generar factura", str(e))
+
     fila_acc = ctk.CTkFrame(barra_hist, fg_color="transparent")
     fila_acc.pack(fill="x", padx=12, pady=(0, 10))
     btn_secundario(fila_acc, "↺  Recargar", _recargar_historial, ancho=120, alto=34).pack(side="left", padx=(0, 8))
     btn_peligro(fila_acc,   "🗑  Eliminar", _eliminar_venta,     ancho=120, alto=34).pack(side="left")
+    btn_primario(fila_acc,  "📄  Factura",  _generar_factura,    ancho=120, alto=34).pack(side="left", padx=(8, 0))
 
     # ══════════════════════════════════════════════════════════════════════════
     # Panel derecho — Nueva Venta
@@ -335,8 +358,6 @@ def abrir_gestionar_ventas(parent: ctk.CTkFrame, id_empleado_sesion=None) -> Non
             _recargar_historial()
         except Exception as e:
             # CORRECCIÓN #10: eliminados import traceback y traceback.print_exc().
-            # Exponer el stack trace en producción filtra información interna
-            # del sistema. El mensaje de excepción es suficiente para el usuario.
             estado_venta.mostrar(str(e), "error")
 
     def _limpiar_carrito():

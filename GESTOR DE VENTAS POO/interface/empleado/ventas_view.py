@@ -7,6 +7,11 @@ CORRECCIONES:
 - id_prod se convierte a int al parsear el combo (igual que en gestionar_ventas.py)
   para que ProductoDAO y actualizar_stock hagan match con la PK en BD.
 - items pasados al controller ya llevan el id_prod normalizado desde el carrito.
+
+MÓDULO DE FACTURACIÓN:
+    Se añade _generar_factura_emp() que delega en UTIL.factura_helper.generar_factura().
+    El botón "📄 Factura" aparece en la barra del historial, al lado de Recargar.
+    Requiere: pip install fpdf2
 """
 
 import customtkinter as ctk
@@ -90,7 +95,6 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
     # ══════════════════════════════════════════════════════════════════════════
     panel_nueva = ctk.CTkScrollableFrame(layout, fg_color="transparent", width=400)
     panel_nueva.pack(side="right", fill="y")
-    
 
     form_venta = panel_formulario(panel_nueva, "🧾 Nueva Venta")
 
@@ -257,9 +261,8 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
             return
 
         id_cli = sel_cli.split(" — ")[0].strip()
-        # CORRECCIÓN: usar los id_prod ya normalizados (int) del carrito
-        items = [(item["id_prod"], item["cantidad"]) for item in _carrito]
-        total = sum(item["subtotal"] for item in _carrito)
+        items  = [(item["id_prod"], item["cantidad"]) for item in _carrito]
+        total  = sum(item["subtotal"] for item in _carrito)
 
         if not confirmar("Confirmar venta",
                          f"¿Registrar venta por {formatear_moneda(total)}?\n"
@@ -330,6 +333,24 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
             )
         )
 
+    # ── FACTURACIÓN ───────────────────────────────────────────────────────────
+    def _generar_factura_emp():
+        """
+        Genera el PDF de factura para la venta seleccionada en el historial.
+        Delega toda la lógica en UTIL.factura_helper.generar_factura().
+        """
+        sel = tabla_hist.selection()
+        if not sel:
+            lbl_conteo.configure(text="Selecciona una venta para facturar.")
+            return
+        id_v = tabla_hist.item(sel[0])["values"][0]
+        try:
+            from UTIL.factura_helper import generar_factura
+            ruta = generar_factura(id_v)
+            exito("Factura generada", f"Archivo guardado en:\n{ruta}")
+        except Exception as e:
+            msg_error("Error al generar factura", str(e))
+
     # ── Botón agregar al carrito ──────────────────────────────────────────────
     btn_primario(form_prod, "➕  Agregar al carrito",
                  _agregar_al_carrito, ancho=200, alto=36).pack(
@@ -344,9 +365,13 @@ def abrir_ventas_empleado(parent: ctk.CTkFrame, id_empleado: str) -> None:
     btn_secundario(fila_final, "✕  Limpiar",
                    _limpiar_carrito, ancho=120, alto=40).pack(side="left")
 
+    # ── Barra de acciones del historial ──────────────────────────────────────
     btn_secundario(barra_hist, "↺  Recargar",
                    _recargar_historial, ancho=110, alto=34).pack(
                        side="left", padx=(0, 8), pady=10)
+    btn_primario(barra_hist, "📄  Factura",
+                 _generar_factura_emp, ancho=110, alto=34).pack(
+                     side="left", pady=10)
 
     entry_buscar.bind("<KeyRelease>",
                       lambda e: _recargar_historial(entry_buscar.get()))
